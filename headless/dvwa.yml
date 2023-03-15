@@ -1,0 +1,18 @@
+id: dvwa-headless-automatic-login
+info:
+  name: DVWA Headless Automatic Login
+  author: recar
+  tags: dvwa
+steps:
+  - setp:
+      -  xpath:  /html/body/div/div[2]/form/fieldset/input[1]
+         value: admin
+         action: input
+      -  xpath:  /html/body/div/div[2]/form/fieldset/input[2]
+         value: password
+         action: input
+      -  xpath:  /html/body/div/div[2]/form/fieldset/p/input
+         action: click
+matcher:
+  value:
+    - You have logged in as

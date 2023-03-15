@@ -1,0 +1,67 @@
+name: 🎉 Build Binary
+on:
+  create:
+    tags:
+      - v*
+  workflow_dispatch:
+jobs:
+
+  build:
+    name: Build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+    steps:
+      - name: Set up Go 1.19
+        uses: actions/setup-go@v1
+        with:
+          go-version: 1.19
+        id: go
+
+      - name: Get version
+        id: get_version
+        run: echo ::set-output name=VERSION::${GITHUB_REF/refs\/tags\//}
+
+      - name: Check out code into the Go module directory
+        uses: actions/checkout@v2
+
+      - name: Get dependencies
+        run: go mod download
+
+      - name: Build On Linux
+        run: |
+          go build -o ./argo ./cmd/argo.go
+          chmod +x argo
+          ls | grep argo
+          tar -cvf Argo-${{ steps.get_version.outputs.VERSION }}-linux.tar argo
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          GOENABLE: 1
+      - name: Build On Darwin
+        run: |
+          go build -o ./argo ./cmd/argo.go
+          chmod +x argo
+          tar -cvf Argo-${{ steps.get_version.outputs.VERSION }}-darwin.tar argo
+        if: matrix.os == 'macos-latest'
+      - name: Build On Windows
+        run: |
+          go build -o ./argo.exe ./cmd/argo.go
+          tar -cvf Argo-${{ steps.get_version.outputs.VERSION }}-windows.tar argo.exe
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          GOOS: windows
+          GOENABLE: 1
+      - name: Release
+        uses: softprops/action-gh-release@master
+        with:
+          # note you'll typically need to create a personal access token
+          # with permissions to create releases in the other repo
+          files: Argo-*
+          fail_on_unmatched_files: true
+          token: ${{ secrets.TOKEN }}
+          append_body: true
+        env:
+          GITHUB_REPOSITORY: Ciyfly/Argo

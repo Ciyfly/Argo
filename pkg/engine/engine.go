@@ -11,12 +11,12 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/http/httputil"
+	"net/url"
 	"time"
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/go-rod/rod/lib/proto"
-	"github.com/urfave/cli/v2"
 )
 
 type EngineInfo struct {
@@ -25,6 +25,9 @@ type EngineInfo struct {
 	Launcher  *launcher.Launcher
 	CloseChan chan int
 	Target    string
+	Host      string
+	HostName  string
+	TabCount  int
 }
 
 type UrlInfo struct {
@@ -34,13 +37,9 @@ type UrlInfo struct {
 	SourceUrl  string
 }
 
-var EngineInfoData *EngineInfo
+// var EngineInfoData *EngineInfo
 
-func InitEngine(c *cli.Context) {
-	target := c.String("target")
-	conf.LoadConfig()
-	// 合并 命令行与 yaml
-	conf.MergeArgs(c)
+func InitEngine(target string) *EngineInfo {
 	// 初始化 js注入插件
 	inject.LoadScript()
 	// 初始化 登录插件
@@ -51,12 +50,13 @@ func InitEngine(c *cli.Context) {
 	InitResultHandler()
 	// 初始化tab控制携程池
 	InitTabPool()
-	// 初始化 urls队列 tab新建
-	InitController(target)
 	// 初始化静态资源过滤
 	InitFilter()
 	// 初始化浏览器
-	EngineInfoData = InitBrowser(target)
+	engineInfo := InitBrowser(target)
+	// 初始化 urls队列 tab新建
+	engineInfo.InitController()
+	return engineInfo
 }
 
 func InitBrowser(target string) *EngineInfo {
@@ -76,19 +76,23 @@ func InitBrowser(target string) *EngineInfo {
 	browser = browser.ControlURL(options.MustLaunch()).MustConnect().NoDefaultDevice().MustIncognito()
 
 	closeChan := make(chan int, 1)
+	u, _ := url.Parse(target)
 	return &EngineInfo{
 		Browser:   browser,
 		Options:   conf.GlobalConfig.BrowserConf,
 		Launcher:  options,
 		CloseChan: closeChan,
-		Target:    target}
+		Target:    target,
+		Host:      u.Host,
+		HostName:  u.Hostname(),
+	}
 }
 
-func Start() {
+func (ei *EngineInfo) Start() {
 	log.Logger.Debugf("tab timeout: %d", conf.GlobalConfig.BrowserConf.TabTimeout)
 	log.Logger.Debugf("browser timeout: %d", conf.GlobalConfig.BrowserConf.BrowserTimeout)
 	// hook 请求响应获取所有异步请求
-	router := EngineInfoData.Browser.HijackRequests()
+	router := ei.Browser.HijackRequests()
 	defer router.Stop()
 	router.MustAdd("*", func(ctx *rod.Hijack) {
 		var reqStr []byte
@@ -115,14 +119,13 @@ func Start() {
 	})
 	go router.Run()
 	// 打开第一个tab页面 这里应该提交url管道任务
-	// PushStaticUrl(EngineInfoData.Target, 0)
-	EngineInfoData.NewTab(&UrlInfo{Url: EngineInfoData.Target}, 0)
+	ei.NewTab(&UrlInfo{Url: ei.Target}, 0)
 	// 结束
 	// 0. 首页解析完成
 	// 1. url管道没有数据
 	// 2. 携程池任务完成
 	// 3. 没有tab页面存在
-	<-EngineInfoData.CloseChan
+	<-ei.CloseChan
 	log.Logger.Debug("front page over")
 	urlsQueueEmpty()
 	log.Logger.Debug("urlsQueueEmpty over")
@@ -134,8 +137,8 @@ func Start() {
 	TabWg.Wait()
 	TabPool.Release()
 	log.Logger.Debug("tabPool over")
-	if EngineInfoData.Browser != nil {
-		closeErr := EngineInfoData.Browser.Close()
+	if ei.Browser != nil {
+		closeErr := ei.Browser.Close()
 		if closeErr != nil {
 			log.Logger.Errorf("browser close err: %s", closeErr)
 
@@ -146,8 +149,8 @@ func Start() {
 	CloseNormalizeQueue()
 	PendingNormalizeQueueEmpty()
 	log.Logger.Debug("pendingNormalizeQueueEmpty over")
-	SaveResult(EngineInfoData.Target)
-	EngineInfoData.Launcher.Kill()
+	ei.Launcher.Kill()
+	ei.SaveResult()
 }
 
 func copyBody(b io.ReadCloser) (r1, r2 io.ReadCloser, err error) {

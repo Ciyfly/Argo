@@ -1,10 +1,14 @@
 package conf
 
 import (
+	"argo/pkg/log"
 	"argo/pkg/utils"
+	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"path"
+	"strings"
 
 	"github.com/spf13/viper"
 	"github.com/urfave/cli/v2"
@@ -37,6 +41,7 @@ type Conf struct {
 	ResultConf       ResultConf
 	PlaybackPath     string
 	TestPlayBack     bool
+	TargetList       []string
 }
 
 // 保存的格式
@@ -110,9 +115,12 @@ func LoadConfig() {
 		InitConfig()
 		readYamlConfig(initConfigPath)
 	}
+	GlobalConfig.TargetList = make([]string, 0)
 }
 
 func MergeArgs(c *cli.Context) {
+	target := c.String("target")
+	targetsFile := c.String("targetsfile")
 	unheadless := c.Bool("unheadless")
 	trace := c.Bool("entrace")
 	slow := c.Float64("slow")
@@ -128,6 +136,30 @@ func MergeArgs(c *cli.Context) {
 	// 处理结果参数
 	save := c.String("save")
 	format := c.String("format")
+	// 目标
+	if target != "" {
+		GlobalConfig.TargetList = append(GlobalConfig.TargetList, target)
+	}
+	if targetsFile != "" {
+		if utils.IsExist(targetsFile) {
+			tf, err := os.Open(targetsFile)
+			if err != nil {
+				log.Logger.Errorf("targetsfile open error: %s", targetsFile)
+				os.Exit(1)
+			}
+			defer tf.Close()
+			br := bufio.NewReader(tf)
+			for {
+				line, _, c := br.ReadLine()
+				if c == io.EOF {
+					break
+				}
+				GlobalConfig.TargetList = append(GlobalConfig.TargetList, strings.Replace(string(line), "\n", "", -1))
+			}
+		} else {
+			log.Logger.Errorf("targetsfile not exist: %s", targetsFile)
+		}
+	}
 	// 浏览器参数
 	if unheadless != GlobalConfig.BrowserConf.UnHeadless {
 		GlobalConfig.BrowserConf.UnHeadless = unheadless

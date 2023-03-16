@@ -6,8 +6,8 @@ import (
 	"argo/pkg/utils"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"text/template"
@@ -142,20 +142,25 @@ func writeResultToHtml(name string) {
 	}
 }
 
-func SaveResult(target string) {
-	log.Logger.Infof("[tab  count] %d", newTabCount)
+func (ei *EngineInfo) SaveResult() {
+	log.Logger.Infof("[tab  count] %d", ei.TabCount)
 	log.Logger.Infof("[  result  ] %d", len(ResultList))
-
-	u, _ := url.Parse(target)
+	ResultOutPutDir := path.Join(utils.GetCurrentDirectory(), "result", ei.HostName)
+	if !utils.IsExist(ResultOutPutDir) {
+		err := os.MkdirAll(ResultOutPutDir, os.ModePerm)
+		if err != nil {
+			log.Logger.Errorf("create result dir %s error: %s", ResultOutPutDir, err)
+		}
+	}
 	saveName := conf.GlobalConfig.ResultConf.Name
 	if saveName == "" {
-		saveName = u.Hostname()
+		saveName = ei.HostName
 	}
 	formatList := strings.Split(conf.GlobalConfig.ResultConf.Format, ",")
 	for _, format := range formatList {
 		if format == "html" {
 			ResultHtmlData = &HtmlData{
-				HostName:   u.Hostname(),
+				HostName:   ei.HostName,
 				DateTime:   utils.GetCurrentTime(),
 				ResultList: ResultList,
 				Count:      len(ResultList),
@@ -163,8 +168,9 @@ func SaveResult(target string) {
 		}
 		if _, ok := FormatMap[format]; ok {
 			fileName := saveName + "." + format
-			FormatMap[format](fileName)
-			log.Logger.Infof("[   save   ] %s", fileName)
+			filePath := path.Join(ResultOutPutDir, fileName)
+			FormatMap[format](filePath)
+			log.Logger.Infof("[   save   ] %s", filePath)
 		} else {
 			log.Logger.Errorf("format out found: %s", format)
 		}

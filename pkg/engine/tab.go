@@ -8,7 +8,6 @@ import (
 	"argo/pkg/playback"
 	"argo/pkg/static"
 	slog "log"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -36,13 +35,13 @@ func InitTabPool() {
 	}
 }
 
-func (di *EngineInfo) NewTab(uif *UrlInfo, flag int) {
+func (ei *EngineInfo) NewTab(uif *UrlInfo, flag int) {
 	TabWg.Add(1)
 	TabPool.Submit(func() {
 		defer TabWg.Done()
-		newTabCount += 1
+		ei.TabCount += 1
 		// 创建tab
-		page, err := di.Browser.Page(proto.TargetCreateTarget{URL: uif.Url})
+		page, err := ei.Browser.Page(proto.TargetCreateTarget{URL: uif.Url})
 		defer page.Close()
 		if err != nil {
 			log.Logger.Errorf("page %s error: %s  sourceType: %s sourceUrl: %s", uif.Url, err, uif.SourceType, uif.SourceUrl)
@@ -57,7 +56,7 @@ func (di *EngineInfo) NewTab(uif *UrlInfo, flag int) {
 		}
 		if conf.GlobalConfig.TestPlayBack {
 			time.Sleep(time.Duration(conf.GlobalConfig.BrowserConf.TabTimeout) * time.Second)
-			EngineInfoData.CloseChan <- flag
+			ei.CloseChan <- flag
 			return
 		}
 		// 设置超时时间
@@ -115,7 +114,7 @@ func (di *EngineInfo) NewTab(uif *UrlInfo, flag int) {
 		log.Logger.Debugf("[close tab ] => %s", uif.Url)
 
 		if flag == 0 {
-			EngineInfoData.CloseChan <- flag
+			ei.CloseChan <- flag
 		}
 		// 所有url提交完成才能结束
 		PushUrlWg.Wait()
@@ -125,14 +124,12 @@ func (di *EngineInfo) NewTab(uif *UrlInfo, flag int) {
 // 接收所有静态url 来处理
 var urlsQueue chan *UrlInfo
 var tabQueue chan *UrlInfo
-var newTabCount int
 
-func InitController(target string) {
+func (ei *EngineInfo) InitController() {
 	urlsQueue = make(chan *UrlInfo, 10000)
 	tabQueue = make(chan *UrlInfo, conf.GlobalConfig.BrowserConf.TabCount)
-	u, _ := url.Parse(target)
-	go StaticUrlWork(u.Scheme + "://" + u.Host + "/")
-	go TabWork()
+	go ei.StaticUrlWork()
+	go ei.TabWork()
 }
 
 func PushStaticUrl(uif *UrlInfo) {
@@ -144,18 +141,18 @@ func PushTabQueue(uif *UrlInfo) {
 	tabQueue <- uif
 }
 
-func TabWork() {
+func (ei *EngineInfo) TabWork() {
 	for {
 		uif := <-tabQueue
-		EngineInfoData.NewTab(uif, 1)
+		ei.NewTab(uif, 1)
 	}
 }
 
-func StaticUrlWork(host string) {
+func (ei *EngineInfo) StaticUrlWork() {
 	for {
 		uif := <-urlsQueue
 		// pass 掉host之外的域名
-		if strings.Contains(uif.Url, "http") && !strings.Contains(uif.Url, host) {
+		if strings.Contains(uif.Url, "http") && !strings.Contains(uif.Url, ei.Host) {
 			continue
 		}
 		if filterStatic(uif.Url) {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"argo/pkg/conf"
 	"argo/pkg/engine"
 	"argo/pkg/log"
 	"fmt"
@@ -36,6 +37,12 @@ func main() {
 			Aliases: []string{"t"},
 			Value:   "",
 			Usage:   "Specify the entry point for testing",
+		},
+		&cli.StringFlag{
+			Name:    "targetsfile",
+			Aliases: []string{"f"},
+			Value:   "",
+			Usage:   "The specified target file list has each target separated by a new line, just like other tools we have used in the past",
 		},
 		&cli.BoolFlag{
 			Name:    "unheadless",
@@ -135,15 +142,23 @@ func RunMain(c *cli.Context) error {
 		}
 	}()
 	target := c.String("target")
-	if target == "" {
-		fmt.Println("you need input target -h look look")
+	targetsFile := c.String("targetsfile")
+	if target == "" && targetsFile == "" {
+		fmt.Println("you need input target or targetsfile -h look look")
+		os.Exit(1)
 	}
 	debug := c.Bool("debug")
-	log.Init(debug)
 	log.Logger.Info("[argo start]")
-	// init
-	engine.InitEngine(c)
-	engine.Start()
-
+	log.Init(debug)
+	// 加载/初始化 config.yml
+	conf.LoadConfig()
+	// 合并 命令行与 yaml
+	conf.MergeArgs(c)
+	// 浏览器引擎初始化
+	for _, t := range conf.GlobalConfig.TargetList {
+		log.Logger.Infof("target: %s", t)
+		eif := engine.InitEngine(t)
+		eif.Start()
+	}
 	return nil
 }

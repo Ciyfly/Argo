@@ -4,6 +4,7 @@ import (
 	"argo/pkg/conf"
 	"argo/pkg/engine"
 	"argo/pkg/log"
+	"argo/pkg/utils"
 	"fmt"
 	"os"
 	"os/signal"
@@ -144,16 +145,21 @@ func RunMain(c *cli.Context) error {
 	}
 	debug := c.Bool("debug")
 	log.Init(debug)
+	log.Logger.Info("[argo start]")
 	// 加载/初始化 config.yml
 	conf.LoadConfig()
 	// 合并 命令行与 yaml
 	conf.MergeArgs(c)
-	log.Logger.Info("[argo start]")
 	// 浏览器引擎初始化
 	for _, t := range conf.GlobalConfig.TargetList {
 		log.Logger.Infof("target: %s", t)
+		if !utils.CheckTarget(t) {
+			log.Logger.Errorf("The target is inaccessible %s", t)
+			continue
+		}
 		eif := engine.InitEngine(t)
 		eif.Start()
+
 	}
 	return nil
 }

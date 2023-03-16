@@ -136,11 +136,6 @@ func main() {
 }
 
 func RunMain(c *cli.Context) error {
-	defer func() {
-		if err := recover(); err != nil {
-			fmt.Printf("painc err: %s\n", err)
-		}
-	}()
 	target := c.String("target")
 	targetsFile := c.String("targetsfile")
 	if target == "" && targetsFile == "" {
@@ -148,12 +143,12 @@ func RunMain(c *cli.Context) error {
 		os.Exit(1)
 	}
 	debug := c.Bool("debug")
-	log.Logger.Info("[argo start]")
 	log.Init(debug)
 	// 加载/初始化 config.yml
 	conf.LoadConfig()
 	// 合并 命令行与 yaml
 	conf.MergeArgs(c)
+	log.Logger.Info("[argo start]")
 	// 浏览器引擎初始化
 	for _, t := range conf.GlobalConfig.TargetList {
 		log.Logger.Infof("target: %s", t)

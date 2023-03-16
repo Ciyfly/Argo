@@ -56,14 +56,14 @@ func resultHandlerWork() {
 func writeResult(name string, data []byte) {
 	resultFile, err := os.Create(name)
 	if err != nil {
-		log.Logger.Errorf(" %s file creation error:", name, err)
+		log.Logger.Errorf(" %s file creation error: %s", name, err)
 		return
 	}
 	defer resultFile.Close()
 
 	_, err = resultFile.Write(data)
 	if err != nil {
-		log.Logger.Errorf("%s file write error:", name, err)
+		log.Logger.Errorf("%s file write error: %s", name, err)
 		return
 	}
 }
@@ -131,13 +131,13 @@ func writeResultToHtml(name string) {
 	}
 	resultFile, err := os.Create(name)
 	if err != nil {
-		log.Logger.Errorf(" %s file creation error:", name, err)
+		log.Logger.Errorf(" %s file creation error: %s", name, err)
 		return
 	}
 	defer resultFile.Close()
 	err = t.Execute(resultFile, ResultHtmlData)
 	if err != nil {
-		log.Logger.Errorf(" %s file creation error:", name, err)
+		log.Logger.Errorf(" %s file creation error: %s", name, err)
 		return
 	}
 }

@@ -39,25 +39,26 @@ COMMANDS:
    help, h  Shows a list of commands or help for one command
 
 GLOBAL OPTIONS:
-   --target value, -t value    Specify the entry point for testing
-   --unheadless, --uh          Is the default interface disabled? Specify 'uh' to enable the interface (default: false)
-   --trace                     Whether to display the elements of operation after opening the interface (default: false)
-   --slow value                The default delay time for operating after enabling  (default: 1000)
-   --username value, -u value  If logging in, the default username  (default: "argo")
-   --password value, -p value  If logging in, the default password (default: "argo123")
-   --email value               If logging in, the default email (default: "argo@recar.com")
-   --phone value               If logging in, the default phone (default: "18888888888")
-   --playback value            Support replay like headless YAML scripts
-   --testplayback              If opened, then directly end after executing the specified playback script (default: false)
-   --proxy value               Set up a proxy, for example, 127.0.0.1:3128
-   --tabcount value, -c value  The maximum number of tab pages that can be opened (default: 10)
-   --tabtimeout value          Set the maximum running time for the tab, and close the tab if it exceeds the limit. The unit is in seconds (default: 180)
-   --browsertimeout value      Set the maximum running time for the browser, and close the browser if it exceeds the limit. The unit is in seconds (default: 3600)
-   --save value                The default name for the saved result is 'target' without a file extension. For example, to save as 'test', use the command '--save test'
-   --format value              Result output format separated by commas, multiple formats can be output at one time, and the supported formats include txt, json, xlsx, and html (default: "txt,json")
-   --debug                     Do you want to output debug information? (default: false)
-   --help, -h                  show help
-   --version, -v               print the version
+   --target value, -t value       Specify the entry point for testing
+   --targetsfile value, -f value  The specified target file list has each target separated by a new line, just like other tools we have used in the past
+   --unheadless, --uh             Is the default interface disabled? Specify 'uh' to enable the interface (default: false)
+   --trace                        Whether to display the elements of operation after opening the interface (default: false)
+   --slow value                   The default delay time for operating after enabling  (default: 1000)
+   --username value, -u value     If logging in, the default username  (default: "argo")
+   --password value, -p value     If logging in, the default password (default: "argo123")
+   --email value                  If logging in, the default email (default: "argo@recar.com")
+   --phone value                  If logging in, the default phone (default: "18888888888")
+   --playback value               Support replay like headless YAML scripts
+   --testplayback                 If opened, then directly end after executing the specified playback script (default: false)
+   --proxy value                  Set up a proxy, for example, 127.0.0.1:3128
+   --tabcount value, -c value     The maximum number of tab pages that can be opened (default: 10)
+   --tabtimeout value             Set the maximum running time for the tab, and close the tab if it exceeds the limit. The unit is in seconds (default: 180)
+   --browsertimeout value         Set the maximum running time for the browser, and close the browser if it exceeds the limit. The unit is in seconds (default: 3600)
+   --save value                   The default name for the saved result is 'target' without a file extension. For example, to save as 'test', use the command '--save test'
+   --format value                 Result output format separated by commas, multiple formats can be output at one time, and the supported formats include txt, json, xlsx, and html (default: "txt,json")
+   --debug                        Do you want to output debug information? (default: false)
+   --help, -h                     show help
+   --version, -v                  print the version
 
 ```
 
@@ -86,6 +87,20 @@ GLOBAL OPTIONS:
 ```
 ![](imgs/playback.gif)
 
+
+### 通过 -f 指定目标文件 即多个target
+
+目前是按顺序单个目标的执行 永远是一个浏览器在运行
+如果 有需要登录的记得增加 用户名密码参数 目前只支持单个  
+
+```shell
+cat targets.txt
+http://testphp.vulnweb.com/
+http://192.168.192.128:8080/
+
+# run argo
+./argo -f targets.txt  --format txt
+```
 
 ### 支持控制事件触发间隔 --slow
 默认是1000ms 即1s 事件如 输入 点击后会等待间隔时间后再继续触发  

@@ -154,7 +154,11 @@ func MergeArgs(c *cli.Context) {
 				if c == io.EOF {
 					break
 				}
-				GlobalConfig.TargetList = append(GlobalConfig.TargetList, strings.Replace(string(line), "\n", "", -1))
+				lineStr := strings.Replace(string(line), "\n", "", -1)
+				if lineStr == "" {
+					continue
+				}
+				GlobalConfig.TargetList = append(GlobalConfig.TargetList, lineStr)
 			}
 		} else {
 			log.Logger.Errorf("targetsfile not exist: %s", targetsFile)

@@ -150,7 +150,6 @@ func RunMain(c *cli.Context) error {
 	conf.LoadConfig()
 	// 合并 命令行与 yaml
 	conf.MergeArgs(c)
-	log.Logger.Info("[argo start]")
 	// 浏览器引擎初始化
 	for _, t := range conf.GlobalConfig.TargetList {
 		log.Logger.Infof("target: %s", t)

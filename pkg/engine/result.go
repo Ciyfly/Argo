@@ -144,6 +144,10 @@ func writeResultToHtml(name string) {
 
 func (ei *EngineInfo) SaveResult() {
 	log.Logger.Infof("[tab  count] %d", ei.TabCount)
+	if len(ResultList) == 1 {
+		log.Logger.Errorf("No content crawled, you can contact the developer to recar target: %s", ei.HostName)
+		return
+	}
 	log.Logger.Infof("[  result  ] %d", len(ResultList))
 	ResultOutPutDir := path.Join(utils.GetCurrentDirectory(), "result", ei.HostName)
 	if !utils.IsExist(ResultOutPutDir) {

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -115,7 +116,9 @@ func (ei *EngineInfo) Start() {
 			RequestStr:      utils.EncodeBase64(reqStr),
 			Status:          ctx.Response.Payload().ResponseCode,
 		}
-		pushpendingNormalizeQueue(pu)
+		if strings.Contains(ctx.Request.URL().String(), ei.HostName) {
+			pushpendingNormalizeQueue(pu)
+		}
 	})
 	go router.Run()
 	// 打开第一个tab页面 这里应该提交url管道任务

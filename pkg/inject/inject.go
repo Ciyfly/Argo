@@ -1,7 +1,6 @@
 package inject
 
 import (
-	"argo/pkg/log"
 	"argo/pkg/utils"
 	"embed"
 	"fmt"
@@ -39,7 +38,6 @@ func LoadScript() {
 			gologger.Error().Msgf("inject before script: %s err: %s", fileInfo.Name(), err)
 		} else {
 			name := utils.GetNameByPath(fileInfo.Name())
-			log.Logger.Debugf("load before script : %s", name)
 			BeforeScriptMap[name] = string(content)
 		}
 	}
@@ -49,7 +47,6 @@ func LoadScript() {
 			gologger.Error().Msgf("inject after script: %s err: %s", fileInfo.Name(), err)
 		} else {
 			name := utils.GetNameByPath(fileInfo.Name())
-			log.Logger.Debugf("load after script : %s", name)
 			AfterScriptMap[name] = string(content)
 		}
 	}
@@ -64,7 +61,6 @@ func InjectScript(page *rod.Page, stage int) {
 	// dom 加载之前
 	if stage == 0 {
 		for name, content := range BeforeScriptMap {
-			log.Logger.Debugf("inject before script: %s", name)
 			_, err := page.Eval(content)
 			if err != nil {
 				gologger.Error().Msgf("inject before script %s err: %s", name, err)
@@ -73,7 +69,6 @@ func InjectScript(page *rod.Page, stage int) {
 	} else {
 		// dom 之后的
 		for name, content := range AfterScriptMap {
-			log.Logger.Debugf("inject after script: %s", name)
 			_, err := page.Eval(content)
 			if err != nil {
 				gologger.Error().Msgf("inject after script %s err: %s", name, err)

@@ -14,6 +14,8 @@ import (
 	cli "github.com/urfave/cli/v2"
 )
 
+var Version = "1.0"
+
 func SetupCloseHandler() {
 	c := make(chan os.Signal)
 	signal.Notify(c, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, os.Interrupt, os.Kill, syscall.SIGKILL)
@@ -30,7 +32,7 @@ func main() {
 	app.Name = "argo"
 	app.Authors = []*cli.Author{&cli.Author{Name: "Recar", Email: "https://github.com/Ciyfly"}}
 	app.Usage = " -t http://testphp.vulnweb.com/"
-	app.Version = "0.1"
+	app.Version = Version
 
 	app.Flags = []cli.Flag{
 		&cli.StringFlag{

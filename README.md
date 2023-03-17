@@ -70,7 +70,7 @@ GLOBAL OPTIONS:
 ./argo -t http://testphp.vulnweb.com/ --format txt 
 ```
 
-![](imgs/vulnweb.svg)
+![](imgs/demo.gif)
 
 ### 测试 DVWA 需要登录的
 

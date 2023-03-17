@@ -42,6 +42,10 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, flag int) {
 		ei.TabCount += 1
 		// 创建tab
 		page, err := ei.Browser.Page(proto.TargetCreateTarget{URL: uif.Url})
+		info, _ := page.Info()
+		if strings.Contains(info.Title, "404") {
+			return
+		}
 		defer page.Close()
 		if err != nil {
 			log.Logger.Errorf("page %s error: %s  sourceType: %s sourceUrl: %s", uif.Url, err, uif.SourceType, uif.SourceUrl)
@@ -73,7 +77,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, flag int) {
 		inject.InjectScript(page, 1)
 		// 静态解析下dom 爬取一些url
 		staticUrlList := static.ParseDom(page)
-		log.Logger.Debugf("parse %s -> staticUrlList: %s", uif.Url, staticUrlList)
+		// log.Logger.Debugf("parse %s -> staticUrlList: %s", uif.Url, staticUrlList)
 		if staticUrlList != nil {
 			for _, staticUrl := range staticUrlList {
 				PushUrlWg.Add(1)
@@ -86,14 +90,14 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, flag int) {
 		// 执行自动化触发事件 输入 点击等 auto
 		hrefList := inject.Auto(page)
 		// auto 触发后 获取下当前url
-		info, err := page.Info()
+		info, err = page.Info()
 		var currentUrl = ""
 		if err != nil {
 			log.Logger.Errorf("page get info err:%s  %s", err, uif.Url)
 		} else {
 			currentUrl = info.URL
 		}
-		log.Logger.Debugf("auto %s ->hrefList: %s", uif.Url, hrefList)
+		// log.Logger.Debugf("auto %s ->hrefList: %s", uif.Url, hrefList)
 		// 解析demo
 		for _, staticUrl := range hrefList {
 			PushUrlWg.Add(1)
@@ -108,7 +112,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, flag int) {
 			PushUrlWg.Add(1)
 			go func(currentUrl string) {
 				defer PushUrlWg.Done()
-				PushStaticUrl(&UrlInfo{Url: currentUrl, SourceType: "patch", SourceUrl: uif.Url})
+				PushStaticUrl(&UrlInfo{Url: info.URL, SourceType: "patch", SourceUrl: uif.Url})
 			}(currentUrl)
 		}
 		log.Logger.Debugf("[close tab ] => %s", uif.Url)
@@ -137,7 +141,7 @@ func PushStaticUrl(uif *UrlInfo) {
 }
 
 func PushTabQueue(uif *UrlInfo) {
-	log.Logger.Debugf("submit url: %s", uif.Url)
+	log.Logger.Debugf("submit url: %s sourceType: %s sourceUrl: %s", uif.Url, uif.SourceType, uif.SourceUrl)
 	tabQueue <- uif
 }
 

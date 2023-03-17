@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"argo/pkg/log"
 	"argo/pkg/utils"
 	"net/http"
 	"net/url"
@@ -108,7 +107,7 @@ func normalizeation(target, method string) string {
 	} else {
 		normalizeStr = method + "|" + normalizeStr
 	}
-	log.Logger.Debugf("normalizeStr url %s -> %s", u, normalizeStr)
+	// log.Logger.Debugf("normalizeStr url %s -> %s", u, normalizeStr)
 
 	return utils.GetMD5(normalizeStr)
 }

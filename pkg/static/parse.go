@@ -76,6 +76,19 @@ func parseJs(content string) []string {
 	return findUrlMatch(content)
 }
 
+func absUrl(urlStr string) string {
+	u, _ := url.Parse(urlStr)
+	p := filepath.Clean(u.Path)
+	base := filepath.Base(p)
+	dir := filepath.Dir(p)
+	abs, _ := filepath.Abs(filepath.Join(dir, base))
+	u.Path = abs
+	if urlStr[len(urlStr)-1:] == "/" {
+		return u.String() + "/"
+	}
+	return u.String()
+}
+
 func HandlerUrl(urlStr, currentUrl string) string {
 	if !strings.Contains(urlStr, "http") {
 		if urlStr[:1] == "/" {
@@ -84,7 +97,12 @@ func HandlerUrl(urlStr, currentUrl string) string {
 			return parsedURL.Scheme + "://" + parsedURL.Host + urlStr
 		} else {
 			// path/index.php?id=1 -> /path/new.php
-			return handlerDynamicUrl(currentUrl) + urlStr
+			newUrl := handlerDynamicUrl(currentUrl) + urlStr
+			if strings.Contains(newUrl, "../") {
+				return absUrl(newUrl)
+			}
+			return newUrl
+			// return handlerDynamicUrl(currentUrl) + urlStr
 		}
 	}
 	return urlStr
@@ -101,8 +119,16 @@ func HandlerUrls(urls []string, currentUrl string) []string {
 				newUrls = append(newUrls, parsedURL.Scheme+"://"+parsedURL.Host+urlStr)
 
 			} else {
+				if strings.Contains(urlStr, "www") {
+					continue
+				}
 				// path/index.php?id=1 -> /path/new.php
-				newUrls = append(newUrls, handlerDynamicUrl(currentUrl)+urlStr)
+				newUrl := handlerDynamicUrl(currentUrl) + urlStr
+				if strings.Contains(newUrl, "../") {
+					newUrls = append(newUrls, absUrl(newUrl))
+				} else {
+					newUrls = append(newUrls, absUrl(newUrl))
+				}
 			}
 		} else {
 			newUrls = append(newUrls, urlStr)

@@ -78,6 +78,9 @@ GLOBAL OPTIONS:
 ./argo -t http://192.168.192.128:8080/ -u admin -p password --format txt
 ```
 
+![](imgs/dvwa.gif)
+
+
 ### 使用 playback 实现dvwa的登录  
 
 ```shell

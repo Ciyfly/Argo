@@ -5,7 +5,7 @@ import "testing"
 func TestFilterStatic(t *testing.T) {
 	InitFilter()
 	target1 := "http://testphp.vulnweb.com/style.css"
-	target2 := "http://testphp.vulnweb.com/AJAX/infoartist.php?id=.css"
+	target2 := "http://testphp.vulnweb.com/hpp/params.php?p=valid&pp=12"
 	target3 := "http://testphp.vulnweb.com/AJAX/styles.css#2378123687"
 	if !filterStatic(target1) {
 		t.Errorf("filterStatic fail: %s", target1)

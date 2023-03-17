@@ -33,7 +33,7 @@ jobs:
 
       - name: Build On Linux
         run: |
-          go build -o ./argo ./cmd/argo.go
+          go build -ldflags "-X main.Version=${{ steps.get_version.outputs.VERSION }}" -o ./argo ./cmd/argo.go
           chmod +x argo
           ls | grep argo
           tar -cvf Argo-${{ steps.get_version.outputs.VERSION }}-linux.tar argo
@@ -42,13 +42,13 @@ jobs:
           GOENABLE: 1
       - name: Build On Darwin
         run: |
-          go build -o ./argo ./cmd/argo.go
+          go build -ldflags "-X main.Version=${{ steps.get_version.outputs.VERSION }}" -o ./argo ./cmd/argo.go
           chmod +x argo
           tar -cvf Argo-${{ steps.get_version.outputs.VERSION }}-darwin.tar argo
         if: matrix.os == 'macos-latest'
       - name: Build On Windows
         run: |
-          go build -o ./argo.exe ./cmd/argo.go
+          go build -ldflags "-X main.Version=${{ steps.get_version.outputs.VERSION }}" -o ./argo.exe ./cmd/argo.go
           tar -cvf Argo-${{ steps.get_version.outputs.VERSION }}-windows.tar argo.exe
         if: matrix.os == 'ubuntu-latest'
         env:

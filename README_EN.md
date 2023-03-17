@@ -69,7 +69,7 @@ GLOBAL OPTIONS:
 ./argo -t http://testphp.vulnweb.com/ --format txt 
 ```
 
-![](imgs/vulnweb.gif)
+![](imgs/demo.gif)
 
 ### test DVWA need to log in
 
@@ -77,14 +77,12 @@ GLOBAL OPTIONS:
 ./argo -t http://192.168.192.128:8080/ -u admin -p password
 ```
 
-![](imgs/dvwa.gif)
 
 ### Use playback to realize dvwa login
 
 ```shell
 ./argo -t http://192.168.192.128:8080/ --playback headless/dvwa.yml  --format txt
 ```
-![](imgs/playback.gif)
 
 
 ### Specify the target file through -f, that is, multiple targets

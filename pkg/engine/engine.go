@@ -5,8 +5,10 @@ import (
 	"argo/pkg/inject"
 	"argo/pkg/log"
 	"argo/pkg/login"
+	"argo/pkg/static/files"
 	"argo/pkg/utils"
 	"bytes"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -21,14 +23,15 @@ import (
 )
 
 type EngineInfo struct {
-	Browser   *rod.Browser
-	Options   conf.BrowserConf
-	Launcher  *launcher.Launcher
-	CloseChan chan int
-	Target    string
-	Host      string
-	HostName  string
-	TabCount  int
+	Browser    *rod.Browser
+	Options    conf.BrowserConf
+	Launcher   *launcher.Launcher
+	CloseChan  chan int
+	Target     string
+	Host       string
+	HostName   string
+	TabCount   int
+	KnownFiles *files.KnownFiles // 从 robots.txt|sitemap.xml 获取路径
 }
 
 type UrlInfo struct {
@@ -81,14 +84,25 @@ func InitBrowser(target string) *EngineInfo {
 	browser = browser.ControlURL(options.MustLaunch()).MustConnect().NoDefaultDevice().MustIncognito()
 	closeChan := make(chan int, 1)
 	u, _ := url.Parse(target)
+
+	var knownFiles *files.KnownFiles
+	httpclient, err := utils.BuildHttpClient(conf.GlobalConfig.BrowserConf.Proxy, nil)
+	if err != nil {
+		log.Logger.Errorln("ould not create http client")
+
+	} else {
+		knownFiles = files.New(httpclient)
+	}
+
 	return &EngineInfo{
-		Browser:   browser,
-		Options:   conf.GlobalConfig.BrowserConf,
-		Launcher:  options,
-		CloseChan: closeChan,
-		Target:    target,
-		Host:      u.Host,
-		HostName:  u.Hostname(),
+		Browser:    browser,
+		Options:    conf.GlobalConfig.BrowserConf,
+		Launcher:   options,
+		CloseChan:  closeChan,
+		Target:     target,
+		Host:       u.Host,
+		HostName:   u.Hostname(),
+		KnownFiles: knownFiles,
 	}
 }
 
@@ -99,31 +113,68 @@ func (ei *EngineInfo) Start() {
 	router := ei.Browser.HijackRequests()
 	defer router.Stop()
 	router.MustAdd("*", func(ctx *rod.Hijack) {
-		var reqStr []byte
-		reqStr, _ = httputil.DumpRequest(ctx.Request.Req(), true)
-		save, body, _ := copyBody(ctx.Request.Req().Body)
-		saveStr, _ := ioutil.ReadAll(save)
-		ctx.Request.Req().Body = body
-		ctx.LoadResponse(http.DefaultClient, true)
-		if ctx.Response.Payload().ResponseCode == 404 {
+		// 用于屏蔽某些请求 img、font
+		// *.woff2 字体
+		if ctx.Request.Type() == proto.NetworkResourceTypeFont {
+			ctx.Response.Fail(proto.NetworkErrorReasonBlockedByClient)
 			return
 		}
-		pu := &PendingUrl{
-			URL:             ctx.Request.URL().String(),
-			Method:          ctx.Request.Method(),
-			Host:            ctx.Request.Req().Host,
-			Headers:         ctx.Request.Req().Header,
-			Data:            string(saveStr),
-			ResponseHeaders: transformHttpHeaders(ctx.Response.Payload().ResponseHeaders),
-			ResponseBody:    utils.EncodeBase64(ctx.Response.Payload().Body),
-			RequestStr:      utils.EncodeBase64(reqStr),
-			Status:          ctx.Response.Payload().ResponseCode,
+		// 图片
+		if ctx.Request.Type() == proto.NetworkResourceTypeImage {
+			ctx.Response.Fail(proto.NetworkErrorReasonBlockedByClient)
+			return
 		}
-		if strings.Contains(ctx.Request.URL().String(), ei.HostName) {
-			pushpendingNormalizeQueue(pu)
+
+		// 防止空指针
+		if ctx.Request.Req() != nil && ctx.Request.Req().URL != nil {
+			// 优化, 先判断,再组合
+			if strings.Contains(ctx.Request.URL().String(), ei.HostName) {
+				if ctx.Response.Payload().ResponseCode == 404 {
+					return
+				}
+
+				var reqStr []byte
+				fmt.Println(ctx.Request.Req().URL)
+				reqStr, _ = httputil.DumpRequest(ctx.Request.Req(), true)
+				save, body, _ := copyBody(ctx.Request.Req().Body)
+				saveStr, _ := ioutil.ReadAll(save)
+				ctx.Request.Req().Body = body
+				ctx.LoadResponse(http.DefaultClient, true)
+
+				pu := &PendingUrl{
+					URL:             ctx.Request.URL().String(),
+					Method:          ctx.Request.Method(),
+					Host:            ctx.Request.Req().Host,
+					Headers:         ctx.Request.Req().Header,
+					Data:            string(saveStr),
+					ResponseHeaders: transformHttpHeaders(ctx.Response.Payload().ResponseHeaders),
+					ResponseBody:    utils.EncodeBase64(ctx.Response.Payload().Body),
+					RequestStr:      utils.EncodeBase64(reqStr),
+					Status:          ctx.Response.Payload().ResponseCode,
+				}
+				pushpendingNormalizeQueue(pu)
+			}
 		}
+
 	})
 	go router.Run()
+
+	if ei.KnownFiles != nil {
+		knownFiles, err := ei.KnownFiles.Request(ei.Target)
+		if err != nil {
+			log.Logger.Errorf("Could not parse known files for %s: %s\n", ei.Target, err)
+		}
+
+		for _, staticUrl := range knownFiles {
+			fmt.Println(staticUrl)
+			PushUrlWg.Add(1)
+			go func(staticUrl string) {
+				defer PushUrlWg.Done()
+				PushStaticUrl(&UrlInfo{Url: staticUrl, SourceType: "static parse", SourceUrl: "robots.txt|sitemap.xml"})
+			}(staticUrl)
+		}
+	}
+
 	// 打开第一个tab页面 这里应该提交url管道任务
 	ei.NewTab(&UrlInfo{Url: ei.Target}, 0)
 	// 结束

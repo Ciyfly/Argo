@@ -5,4 +5,5 @@ argo
 *.xlsx
 *.html
 *.py
+.idea
 result

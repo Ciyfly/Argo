@@ -157,6 +157,13 @@ https://chat.openai.com/
 
 argo的编译后的程序是 github action 自动编译的 当然可以自己编译  
 
+## 交流
+可以加群交流Argo方面的问题  
+
+![](imgs/Argo交流群.jpg)
+
+
+
 ## 声明
 
 使用argo前请遵守当地法律,argo仅提供给教育行为使用。

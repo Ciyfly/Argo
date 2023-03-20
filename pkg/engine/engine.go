@@ -100,9 +100,16 @@ func (ei *EngineInfo) Start() {
 	defer router.Stop()
 	router.MustAdd("*", func(ctx *rod.Hijack) {
 		var reqStr []byte
+		var save, body io.ReadCloser
+		var saveBytes []byte
+		body = nil
 		reqStr, _ = httputil.DumpRequest(ctx.Request.Req(), true)
-		save, body, _ := copyBody(ctx.Request.Req().Body)
-		saveStr, _ := ioutil.ReadAll(save)
+		// fix 20230320 body nil copy处理会导致 nginx 411 问题 只有当post才进行处理
+		// https://open.baidu.com/
+		if ctx.Request.Method() == "POST" {
+			save, body, _ = copyBody(ctx.Request.Req().Body)
+			saveBytes, _ = ioutil.ReadAll(save)
+		}
 		ctx.Request.Req().Body = body
 		ctx.LoadResponse(http.DefaultClient, true)
 		if ctx.Response.Payload().ResponseCode == 404 {
@@ -113,7 +120,7 @@ func (ei *EngineInfo) Start() {
 			Method:          ctx.Request.Method(),
 			Host:            ctx.Request.Req().Host,
 			Headers:         ctx.Request.Req().Header,
-			Data:            string(saveStr),
+			Data:            string(saveBytes),
 			ResponseHeaders: transformHttpHeaders(ctx.Response.Payload().ResponseHeaders),
 			ResponseBody:    utils.EncodeBase64(ctx.Response.Payload().Body),
 			RequestStr:      utils.EncodeBase64(reqStr),

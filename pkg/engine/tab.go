@@ -46,6 +46,10 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, flag int) {
 		if strings.Contains(info.Title, "404") {
 			return
 		}
+		// 调试模式 手动去操作 停止所有
+		if conf.GlobalConfig.Dev {
+			return
+		}
 		defer page.Close()
 		if err != nil {
 			log.Logger.Errorf("page %s error: %s  sourceType: %s sourceUrl: %s", uif.Url, err, uif.SourceType, uif.SourceUrl)

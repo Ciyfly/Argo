@@ -70,7 +70,11 @@ func InitBrowser(target string) *EngineInfo {
 	// options := launcher.New().Devtools(true)
 	//  NoSandbox fix linux下root运行报错的问题
 	options := launcher.New().NoSandbox(true).Headless(true)
-	if conf.GlobalConfig.BrowserConf.UnHeadless {
+	// 禁用所有提示防止阻塞 浏览器
+	options = options.Append("--disable-infobars", "")
+	options = options.Append("--disable-extensions", "")
+
+	if conf.GlobalConfig.BrowserConf.UnHeadless || conf.GlobalConfig.Dev {
 		options = options.Delete("--headless")
 		browser = browser.SlowMotion(time.Duration(conf.GlobalConfig.AutoConf.Slow) * time.Second)
 	}
@@ -128,6 +132,10 @@ func (ei *EngineInfo) Start() {
 	// 1. url管道没有数据
 	// 2. 携程池任务完成
 	// 3. 没有tab页面存在
+	if conf.GlobalConfig.Dev {
+		log.Logger.Warn("!!! dev mode please ctrl +c kill !!!")
+		select {}
+	}
 	<-ei.CloseChan
 	log.Logger.Debug("front page over")
 	urlsQueueEmpty()

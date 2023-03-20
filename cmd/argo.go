@@ -128,6 +128,11 @@ func main() {
 			Value: false,
 			Usage: "Do you want to output debug information?",
 		},
+		&cli.BoolFlag{
+			Name:  "dev",
+			Value: false,
+			Usage: "Enable dev mode. This will activate the browser interface mode and stop after accessing the page for development and debugging purposes",
+		},
 	}
 	app.Action = RunMain
 

@@ -42,6 +42,7 @@ type Conf struct {
 	PlaybackPath     string
 	TestPlayBack     bool
 	TargetList       []string
+	Dev              bool
 }
 
 // 保存的格式
@@ -136,6 +137,10 @@ func MergeArgs(c *cli.Context) {
 	// 处理结果参数
 	save := c.String("save")
 	format := c.String("format")
+
+	// debug dev
+	devMode := c.Bool("dev")
+
 	// 目标
 	if target != "" {
 		GlobalConfig.TargetList = append(GlobalConfig.TargetList, target)
@@ -201,4 +206,7 @@ func MergeArgs(c *cli.Context) {
 	// 结果处理参数
 	GlobalConfig.ResultConf.Name = save
 	GlobalConfig.ResultConf.Format = format
+
+	//dev
+	GlobalConfig.Dev = devMode
 }

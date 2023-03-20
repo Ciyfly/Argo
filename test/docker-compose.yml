@@ -1,0 +1,11 @@
+version: '2'
+
+services:
+    test:
+        restart: always
+        image: httpd
+        container_name: argo_test
+        ports:
+          - "8787:80"
+        volumes:
+            - ./:/usr/local/apache2/htdocs/

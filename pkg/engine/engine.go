@@ -71,17 +71,14 @@ func InitBrowser(target string) *EngineInfo {
 	//  NoSandbox fix linux下root运行报错的问题
 	options := launcher.New().NoSandbox(true).Headless(true)
 	// 禁用所有提示防止阻塞 浏览器
-	options = options.Append("--disable-infobars", "")
-	options = options.Append("--disable-extensions", "")
-	options = options.Append("--disable-download-extensions", "")
-	options = options.Append("--disable-file-system", "")
+	options = options.Append("disable-infobars", "")
+	options = options.Append("disable-extensions", "")
 
 	if conf.GlobalConfig.BrowserConf.UnHeadless || conf.GlobalConfig.Dev {
 		options = options.Delete("--headless")
 		browser = browser.SlowMotion(time.Duration(conf.GlobalConfig.AutoConf.Slow) * time.Second)
 	}
 	browser = browser.ControlURL(options.MustLaunch()).MustConnect().NoDefaultDevice().MustIncognito()
-
 	closeChan := make(chan int, 1)
 	u, _ := url.Parse(target)
 	return &EngineInfo{

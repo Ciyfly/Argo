@@ -73,6 +73,8 @@ func InitBrowser(target string) *EngineInfo {
 	// 禁用所有提示防止阻塞 浏览器
 	options = options.Append("--disable-infobars", "")
 	options = options.Append("--disable-extensions", "")
+	options = options.Append("--disable-download-extensions", "")
+	options = options.Append("--disable-file-system", "")
 
 	if conf.GlobalConfig.BrowserConf.UnHeadless || conf.GlobalConfig.Dev {
 		options = options.Delete("--headless")

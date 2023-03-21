@@ -13,12 +13,10 @@ func sitemapXmlSpider(URL string) (navigationRequests []string) {
 	URL = strings.TrimSuffix(URL, "/")
 	requestURL := fmt.Sprintf("%s/sitemap.xml", URL)
 	response := req.GetResponse(requestURL)
-	if response.StatusCode != http.StatusOK {
-		return navigationRequests
+	if response == nil || response.StatusCode != http.StatusOK {
+		return nil
 	}
-	if response != nil {
-		navigationRequests = append(navigationRequests, parseSiteMapXmlReader(response)...)
-	}
+	navigationRequests = append(navigationRequests, parseSiteMapXmlReader(response)...)
 	defer response.Body.Close()
 	return navigationRequests
 }

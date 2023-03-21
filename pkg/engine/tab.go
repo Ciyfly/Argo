@@ -37,6 +37,7 @@ func InitTabPool() {
 
 func (ei *EngineInfo) NewTab(uif *UrlInfo, flag int) {
 	TabWg.Add(1)
+
 	TabPool.Submit(func() {
 		defer TabWg.Done()
 		ei.TabCount += 1

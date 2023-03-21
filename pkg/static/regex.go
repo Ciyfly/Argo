@@ -11,3 +11,8 @@ func findUrlMatch(content string) []string {
 	urls := urlRegex.FindAllString(content, -1)
 	return urls
 }
+
+func MatchKeyExist(content []byte, regexStr string) bool {
+	regex := regexp.MustCompile(regexStr)
+	return regex.Match(content)
+}

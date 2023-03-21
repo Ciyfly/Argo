@@ -70,7 +70,7 @@ func InitBrowser(target string) *EngineInfo {
 	}
 	// options := launcher.New().Devtools(true)
 	//  NoSandbox fix linux下root运行报错的问题
-	options := launcher.New().NoSandbox(true).Headless(true)
+	options := launcher.New().NoSandbox(true).Headless(true).Devtools(true)
 	// 禁用所有提示防止阻塞 浏览器
 	options = options.Append("disable-infobars", "")
 	options = options.Append("disable-extensions", "")
@@ -132,6 +132,13 @@ func (ei *EngineInfo) Start() {
 				// load 后才有响应相关
 				if ctx.Response.Payload().ResponseCode == http.StatusNotFound {
 					return
+				}
+				// 先简单的通过关键字匹配 404页面
+				if ctx.Response.Payload().Body != nil {
+					if static.Match404ResponsePage(reqBytes) {
+						log.Logger.Warnf("404 response: %s", ctx.Request.URL().String())
+						return
+					}
 				}
 				pu := &PendingUrl{
 					URL:             ctx.Request.URL().String(),

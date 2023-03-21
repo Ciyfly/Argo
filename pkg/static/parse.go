@@ -98,6 +98,7 @@ func HandlerUrl(urlStr, currentUrl string) string {
 		} else {
 			// path/index.php?id=1 -> /path/new.php
 			newUrl := handlerDynamicUrl(currentUrl) + urlStr
+			// http://testphp.vulnweb.com/hpp/?pp=12
 			if strings.Contains(newUrl, "../") {
 				return absUrl(newUrl)
 			}

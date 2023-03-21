@@ -4,7 +4,7 @@ import (
 	"argo/pkg/conf"
 	"argo/pkg/engine"
 	"argo/pkg/log"
-	"argo/pkg/utils"
+	"argo/pkg/req"
 	"fmt"
 	"os"
 	"os/signal"
@@ -160,7 +160,7 @@ func RunMain(c *cli.Context) error {
 	// 浏览器引擎初始化
 	for _, t := range conf.GlobalConfig.TargetList {
 		log.Logger.Infof("target: %s", t)
-		if !utils.CheckTarget(t) {
+		if !req.CheckTarget(t) {
 			log.Logger.Errorf("The target is inaccessible %s", t)
 			continue
 		}

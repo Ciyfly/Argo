@@ -1,10 +1,11 @@
-package files
+package static
 
 import (
+	"bytes"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"net/url"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -12,7 +13,6 @@ import (
 
 func TestSitemapXmlParseReader(t *testing.T) {
 	requests := []string{}
-	crawler := &sitemapXmlCrawler{}
 
 	content := `<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 <sitemap>
@@ -23,8 +23,8 @@ func TestSitemapXmlParseReader(t *testing.T) {
 </sitemap>
 </sitemapindex>`
 	parsed, _ := url.Parse("http://security-crawl-maze.app/sitemap.xml")
-	navigationRequests, err := crawler.parseReader(strings.NewReader(content), &http.Response{Request: &http.Request{URL: parsed}})
-	require.Nil(t, err)
+	body := ioutil.NopCloser(bytes.NewReader([]byte(content)))
+	navigationRequests := parseSiteMapXmlReader(&http.Response{Request: &http.Request{URL: parsed}, Body: body})
 	for _, navReq := range navigationRequests {
 		fmt.Println(navReq)
 		requests = append(requests, navReq)

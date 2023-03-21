@@ -5,10 +5,9 @@ import (
 	"argo/pkg/inject"
 	"argo/pkg/log"
 	"argo/pkg/login"
-	"argo/pkg/static/files"
+	"argo/pkg/static"
 	"argo/pkg/utils"
 	"bytes"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -23,15 +22,14 @@ import (
 )
 
 type EngineInfo struct {
-	Browser    *rod.Browser
-	Options    conf.BrowserConf
-	Launcher   *launcher.Launcher
-	CloseChan  chan int
-	Target     string
-	Host       string
-	HostName   string
-	TabCount   int
-	KnownFiles *files.KnownFiles // 从 robots.txt|sitemap.xml 获取路径
+	Browser   *rod.Browser
+	Options   conf.BrowserConf
+	Launcher  *launcher.Launcher
+	CloseChan chan int
+	Target    string
+	Host      string
+	HostName  string
+	TabCount  int
 }
 
 type UrlInfo struct {
@@ -85,24 +83,14 @@ func InitBrowser(target string) *EngineInfo {
 	closeChan := make(chan int, 1)
 	u, _ := url.Parse(target)
 
-	var knownFiles *files.KnownFiles
-	httpclient, err := utils.BuildHttpClient(conf.GlobalConfig.BrowserConf.Proxy, nil)
-	if err != nil {
-		log.Logger.Errorln("ould not create http client")
-
-	} else {
-		knownFiles = files.New(httpclient)
-	}
-
 	return &EngineInfo{
-		Browser:    browser,
-		Options:    conf.GlobalConfig.BrowserConf,
-		Launcher:   options,
-		CloseChan:  closeChan,
-		Target:     target,
-		Host:       u.Host,
-		HostName:   u.Hostname(),
-		KnownFiles: knownFiles,
+		Browser:   browser,
+		Options:   conf.GlobalConfig.BrowserConf,
+		Launcher:  options,
+		CloseChan: closeChan,
+		Target:    target,
+		Host:      u.Host,
+		HostName:  u.Hostname(),
 	}
 }
 
@@ -127,24 +115,24 @@ func (ei *EngineInfo) Start() {
 
 		// 防止空指针
 		if ctx.Request.Req() != nil && ctx.Request.Req().URL != nil {
+
 			// 优化, 先判断,再组合
 			if strings.Contains(ctx.Request.URL().String(), ei.HostName) {
-				if ctx.Response.Payload().ResponseCode == 404 {
-					return
-				}
 				var save, body io.ReadCloser
 				var saveBytes, reqBytes []byte
-				body = nil
 				reqBytes, _ = httputil.DumpRequest(ctx.Request.Req(), true)
 				// fix 20230320 body nil copy处理会导致 nginx 411 问题 只有当post才进行处理
 				// https://open.baidu.com/
-				if ctx.Request.Method() == "POST" {
+				if ctx.Request.Method() == http.MethodPost {
 					save, body, _ = copyBody(ctx.Request.Req().Body)
 					saveBytes, _ = ioutil.ReadAll(save)
 				}
 				ctx.Request.Req().Body = body
 				ctx.LoadResponse(http.DefaultClient, true)
-
+				// load 后才有响应相关
+				if ctx.Response.Payload().ResponseCode == http.StatusNotFound {
+					return
+				}
 				pu := &PendingUrl{
 					URL:             ctx.Request.URL().String(),
 					Method:          ctx.Request.Method(),
@@ -162,21 +150,15 @@ func (ei *EngineInfo) Start() {
 
 	})
 	go router.Run()
-
-	if ei.KnownFiles != nil {
-		knownFiles, err := ei.KnownFiles.Request(ei.Target)
-		if err != nil {
-			log.Logger.Errorf("Could not parse known files for %s: %s\n", ei.Target, err)
-		}
-
-		for _, staticUrl := range knownFiles {
-			fmt.Println(staticUrl)
-			PushUrlWg.Add(1)
-			go func(staticUrl string) {
-				defer PushUrlWg.Done()
-				PushStaticUrl(&UrlInfo{Url: staticUrl, SourceType: "static parse", SourceUrl: "robots.txt|sitemap.xml"})
-			}(staticUrl)
-		}
+	// 元数据文件 rotbots.txt sitemap.xml
+	metadataList := static.MetaDataSpider(ei.Target)
+	for _, staticUrl := range metadataList {
+		PushUrlWg.Add(1)
+		log.Logger.Debugf("metadata parse: %s", staticUrl)
+		go func(staticUrl string) {
+			defer PushUrlWg.Done()
+			PushStaticUrl(&UrlInfo{Url: staticUrl, SourceType: "metadata parse", SourceUrl: "robots.txt|sitemap.xml"})
+		}(staticUrl)
 	}
 
 	// 打开第一个tab页面 这里应该提交url管道任务

@@ -1,13 +1,12 @@
 package utils
 
 import (
+	"argo/pkg/log"
 	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
-
-	"github.com/projectdiscovery/gologger"
 )
 
 // 判断所给路径文件/文件夹是否存在
@@ -20,7 +19,7 @@ func IsExist(path string) bool {
 		if os.IsNotExist(err) {
 			return false
 		}
-		gologger.Error().Msgf("utils file IsExist err: %s", err)
+		log.Logger.Errorf("utils file IsExist err: %s", err)
 		return false
 	}
 	return true
@@ -29,7 +28,7 @@ func IsExist(path string) bool {
 func GetCurrentDirectory() string {
 	dir, err := filepath.Abs(filepath.Dir(os.Args[0]))
 	if err != nil {
-		gologger.Error().Msgf("GetCurrentDirectory: %s", err)
+		log.Logger.Errorf("GetCurrentDirectory: %s", err)
 	}
 	return strings.Replace(dir, "\\", "/", -1)
 }
@@ -38,7 +37,7 @@ func GetAllDirectoryPaths(dirPath string) []string {
 	result := []string{}
 	fis, err := ioutil.ReadDir(dirPath)
 	if err != nil {
-		gologger.Error().Msgf("GetAllDirectoryPaths: %s", err)
+		log.Logger.Errorf("GetAllDirectoryPaths: %s", err)
 		return result
 	}
 	for _, fi := range fis {

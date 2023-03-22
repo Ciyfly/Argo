@@ -1,12 +1,12 @@
 package inject
 
 import (
+	"argo/pkg/log"
 	"argo/pkg/utils"
 	"embed"
 	"fmt"
 
 	"github.com/go-rod/rod"
-	"github.com/projectdiscovery/gologger"
 )
 
 //go:embed after/*.js
@@ -23,19 +23,19 @@ func LoadScript() {
 	BeforeScriptMap = make(map[string]string)
 	afterFileInfos, err := afterFs.ReadDir("after")
 	if err != nil {
-		gologger.Error().Msgf("load after script err %s", err)
+		log.Logger.Debugf("load after script err %s", err)
 		return
 	}
 	beforeFileInfos, err := befoerFs.ReadDir("before")
 	if err != nil {
-		gologger.Error().Msgf("load before script err %s", err)
+		log.Logger.Debugf("load before script err %s", err)
 		return
 	}
 
 	for _, fileInfo := range beforeFileInfos {
 		content, err := befoerFs.ReadFile(fmt.Sprintf("before/%s", fileInfo.Name()))
 		if err != nil {
-			gologger.Error().Msgf("inject before script: %s err: %s", fileInfo.Name(), err)
+			log.Logger.Debugf("inject before script: %s err: %s", fileInfo.Name(), err)
 		} else {
 			name := utils.GetNameByPath(fileInfo.Name())
 			BeforeScriptMap[name] = string(content)
@@ -44,7 +44,7 @@ func LoadScript() {
 	for _, fileInfo := range afterFileInfos {
 		content, err := afterFs.ReadFile(fmt.Sprintf("after/%s", fileInfo.Name()))
 		if err != nil {
-			gologger.Error().Msgf("inject after script: %s err: %s", fileInfo.Name(), err)
+			log.Logger.Debugf("inject after script: %s err: %s", fileInfo.Name(), err)
 		} else {
 			name := utils.GetNameByPath(fileInfo.Name())
 			AfterScriptMap[name] = string(content)
@@ -52,7 +52,7 @@ func LoadScript() {
 	}
 
 	if len(afterFileInfos) == 0 && len(beforeFileInfos) == 0 {
-		gologger.Warning().Msg("没有找到注入js脚本")
+		log.Logger.Debug("没有找到注入js脚本")
 	}
 
 }
@@ -63,7 +63,7 @@ func InjectScript(page *rod.Page, stage int) {
 		for name, content := range BeforeScriptMap {
 			_, err := page.Eval(content)
 			if err != nil {
-				gologger.Error().Msgf("inject before script %s err: %s", name, err)
+				log.Logger.Debugf("inject before script %s err: %s", name, err)
 			}
 		}
 	} else {
@@ -71,7 +71,7 @@ func InjectScript(page *rod.Page, stage int) {
 		for name, content := range AfterScriptMap {
 			_, err := page.Eval(content)
 			if err != nil {
-				gologger.Error().Msgf("inject after script %s err: %s", name, err)
+				log.Logger.Debugf("inject after script %s err: %s", name, err)
 			}
 		}
 	}

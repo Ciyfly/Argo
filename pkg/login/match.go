@@ -1,10 +1,10 @@
 package login
 
 import (
+	"argo/pkg/log"
 	"strings"
 
 	"github.com/go-rod/rod"
-	"github.com/projectdiscovery/gologger"
 )
 
 var usernameMatchList = []string{
@@ -40,7 +40,7 @@ func (lp *LoginAutoData) matchLoginUsername() []*rod.Element {
 	usernameElementList := []*rod.Element{}
 	inputs, err := lp.Page.Elements("input")
 	if err != nil {
-		gologger.Error().Msgf("matchLoginUsername err: %s", err)
+		log.Logger.Warnf("matchLoginUsername err: %s", err)
 	}
 	for _, input := range inputs {
 		eType, err := input.Attribute("type")
@@ -76,7 +76,7 @@ func (lp *LoginAutoData) matchLoginEmail() []*rod.Element {
 	emailElementList := []*rod.Element{}
 	inputs, err := lp.Page.Elements("input")
 	if err != nil {
-		gologger.Error().Msgf("matchLoginemail err: %s", err)
+		log.Logger.Warnf("matchLoginemail err: %s", err)
 	}
 	for _, input := range inputs {
 		eType, err := input.Attribute("type")
@@ -117,7 +117,7 @@ func (lp *LoginAutoData) matchLoginPhone() []*rod.Element {
 	phoneElementList := []*rod.Element{}
 	inputs, err := lp.Page.Elements("input")
 	if err != nil {
-		gologger.Error().Msgf("matchLoginphone err: %s", err)
+		log.Logger.Warnf("matchLoginphone err: %s", err)
 	}
 	for _, input := range inputs {
 		eType, err := input.Attribute("type")
@@ -159,7 +159,7 @@ func (lp *LoginAutoData) matchLoginPassword() []*rod.Element {
 	passwordElementList := []*rod.Element{}
 	inputs, err := lp.Page.Elements("input")
 	if err != nil {
-		gologger.Error().Msgf("matchLoginpassword err: %s", err)
+		log.Logger.Warnf("matchLoginpassword err: %s", err)
 	}
 	for _, input := range inputs {
 		eType, err := input.Attribute("type")
@@ -194,7 +194,7 @@ func (lp *LoginAutoData) matchLoginSubmit() []*rod.Element {
 	submitElementList := []*rod.Element{}
 	buttons, err := lp.Page.Elements("button")
 	if err != nil {
-		gologger.Error().Msgf("matchLoginsubmit err: %s", err)
+		log.Logger.Warnf("matchLoginsubmit err: %s", err)
 	}
 	for _, button := range buttons {
 		eType, err := button.Attribute("type")
@@ -202,7 +202,6 @@ func (lp *LoginAutoData) matchLoginSubmit() []*rod.Element {
 			continue
 		}
 		buttonHtml, _ := button.HTML()
-		gologger.Debug().Msg(buttonHtml)
 		if *eType == "submit" {
 			submitElementList = append(submitElementList, button)
 			continue
@@ -243,7 +242,7 @@ func (lp *LoginAutoData) tryLogin() {
 		// pointer-events: none;
 		pointerEvent := se.MustEval("()=>window.getComputedStyle(this,null).getPropertyValue('pointer-events')")
 		if pointerEvent.String() == "none" {
-			gologger.Debug().Msg("登录按钮存在 pointer-events 尝试点击子元素")
+			log.Logger.Debug("登录按钮存在 pointer-events 尝试点击子元素")
 			// 对子元素进行点击
 			children, err := se.Elements("")
 			if err != nil {
@@ -253,7 +252,7 @@ func (lp *LoginAutoData) tryLogin() {
 				c.MustClick()
 			}
 		} else {
-			gologger.Debug().Msg("尝试点击登录按钮")
+			log.Logger.Debug("尝试点击登录按钮")
 			se.MustClick()
 		}
 	}

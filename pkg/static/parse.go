@@ -2,6 +2,7 @@ package static
 
 import (
 	"argo/pkg/log"
+	"argo/pkg/utils"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -139,14 +140,14 @@ func HandlerUrls(urls []string, currentUrl string) []string {
 }
 
 func ParseDom(page *rod.Page) []string {
-	info, err := page.Info()
+	target, err := utils.GetCurrentUrlByPage(page)
 	if err != nil {
 		return nil
 	}
-	log.Logger.Debugf("parse dom %s", info.URL)
+	log.Logger.Debugf("parse dom %s", target)
 	// 获取所有html
 	htmlStr, err := page.HTML()
-	parsedURL, _ := url.Parse(info.URL)
+	parsedURL, _ := url.Parse(target)
 	strippedURL := parsedURL.Scheme + "://" + parsedURL.Host + parsedURL.Path
 	if strippedURL[len(strippedURL)-1:] != "/" {
 		strippedURL = parsedURL.Scheme + "://" + parsedURL.Host + "/"

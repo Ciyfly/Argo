@@ -14,6 +14,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -50,14 +51,12 @@ func InitEngine(target string) *EngineInfo {
 	InitNormalize()
 	// 初始化 结果处理模块
 	InitResultHandler()
-	// 初始化tab控制携程池
-	InitTabPool()
 	// 初始化静态资源过滤
 	InitFilter()
 	// 初始化浏览器
 	engineInfo := InitBrowser(target)
-	// 初始化 urls队列 tab新建
-	engineInfo.InitController()
+	// 初始化tab控制携程池
+	engineInfo.InitTabPool()
 	return engineInfo
 }
 
@@ -70,7 +69,7 @@ func InitBrowser(target string) *EngineInfo {
 	}
 	// options := launcher.New().Devtools(true)
 	//  NoSandbox fix linux下root运行报错的问题
-	options := launcher.New().NoSandbox(true).Headless(true).Devtools(true)
+	options := launcher.New().NoSandbox(true).Headless(true)
 	// 禁用所有提示防止阻塞 浏览器
 	options = options.Append("disable-infobars", "")
 	options = options.Append("disable-extensions", "")
@@ -95,8 +94,9 @@ func InitBrowser(target string) *EngineInfo {
 }
 
 func (ei *EngineInfo) Start() {
-	log.Logger.Debugf("tab timeout: %d", conf.GlobalConfig.BrowserConf.TabTimeout)
-	log.Logger.Debugf("browser timeout: %d", conf.GlobalConfig.BrowserConf.BrowserTimeout)
+	log.Logger.Debugf("tab timeout: %ds", conf.GlobalConfig.BrowserConf.TabTimeout)
+	log.Logger.Debugf("browser timeout: %ds", conf.GlobalConfig.BrowserConf.BrowserTimeout)
+	log.Logger.Debugf("tab controller count: %d", conf.GlobalConfig.BrowserConf.TabCount)
 	// hook 请求响应获取所有异步请求
 	router := ei.Browser.HijackRequests()
 	defer router.Stop()
@@ -157,19 +157,21 @@ func (ei *EngineInfo) Start() {
 
 	})
 	go router.Run()
-	// 元数据文件 rotbots.txt sitemap.xml
+	var metadataWg sync.WaitGroup
 	metadataList := static.MetaDataSpider(ei.Target)
 	for _, staticUrl := range metadataList {
-		PushUrlWg.Add(1)
+		metadataWg.Add(1)
 		log.Logger.Debugf("metadata parse: %s", staticUrl)
 		go func(staticUrl string) {
-			defer PushUrlWg.Done()
+			defer metadataWg.Done()
 			PushStaticUrl(&UrlInfo{Url: staticUrl, SourceType: "metadata parse", SourceUrl: "robots.txt|sitemap.xml"})
 		}(staticUrl)
 	}
-
+	metadataWg.Wait()
 	// 打开第一个tab页面 这里应该提交url管道任务
-	ei.NewTab(&UrlInfo{Url: ei.Target}, 0)
+	TabWg.Add(1)
+	go ei.NewTab(&UrlInfo{Url: ei.Target}, 0)
+	// 元数据文件 rotbots.txt sitemap.xml
 	// 结束
 	// 0. 首页解析完成
 	// 1. url管道没有数据
@@ -180,11 +182,10 @@ func (ei *EngineInfo) Start() {
 		select {}
 	}
 	<-ei.CloseChan
-	log.Logger.Debug("front page over")
+	log.Logger.Debug("first page over")
 	urlsQueueEmpty()
 	log.Logger.Debug("urlsQueueEmpty over")
 	TabWg.Wait()
-	TabPool.Release()
 	log.Logger.Debug("tabPool over")
 	if ei.Browser != nil {
 		closeErr := ei.Browser.Close()

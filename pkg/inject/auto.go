@@ -4,6 +4,7 @@ import (
 	"argo/pkg/conf"
 	"argo/pkg/log"
 	"argo/pkg/static"
+	"argo/pkg/utils"
 	"fmt"
 	"strings"
 
@@ -161,9 +162,9 @@ func Auto(page *rod.Page) []string {
 		conf.GlobalConfig.LoginConf.Phone,
 		conf.GlobalConfig.AutoConf.Slow,
 		strings.Join(conf.GlobalConfig.AutoConf.Fliter, ","))
-	info, err := page.Info()
+	info, err := utils.GetPageInfoByPage(page)
 	if err != nil {
-		return hrefList
+		return nil
 	}
 	log.Logger.Debugf("run auto js %s", info.URL)
 	hrefArrays, err := page.Eval(content)

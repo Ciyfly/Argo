@@ -7,13 +7,13 @@ import (
 	"argo/pkg/login"
 	"argo/pkg/playback"
 	"argo/pkg/static"
-	slog "log"
+	"argo/pkg/utils"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
-	"github.com/panjf2000/ants/v2"
 )
 
 type Faker struct {
@@ -23,37 +23,47 @@ func (f *Faker) Write(p []byte) (n int, err error) {
 	return 0, nil
 }
 
-var TabPool *ants.Pool
 var TabWg sync.WaitGroup
-var PushUrlWg sync.WaitGroup
+var TabLimit chan int
 
-func InitTabPool() {
-	var err error
-	TabPool, err = ants.NewPool(conf.GlobalConfig.BrowserConf.TabCount, ants.WithLogger(slog.New(&Faker{}, "", -1)))
-	if err != nil {
-		log.Logger.Errorf("init tab pool error: %s", err)
+func (ei *EngineInfo) closeTab(page *rod.Page, flag int, done chan bool) {
+	if flag == 0 {
+		ei.CloseChan <- flag
 	}
+	<-TabLimit
+	if page != nil {
+		page.Close()
+	}
+	TabWg.Done()
 }
 
 func (ei *EngineInfo) NewTab(uif *UrlInfo, flag int) {
-	TabWg.Add(1)
-
-	TabPool.Submit(func() {
-		defer TabWg.Done()
-		ei.TabCount += 1
+	TabLimit <- 1
+	var PushUrlWg sync.WaitGroup
+	done := make(chan bool)
+	ei.TabCount += 1
+	go func() {
 		// 创建tab
 		page, err := ei.Browser.Page(proto.TargetCreateTarget{URL: uif.Url})
-		info, _ := page.Info()
-		if strings.Contains(info.Title, "404") {
+		info, err := utils.GetPageInfoByPage(page)
+		if err != nil {
+			// 超时干掉了page
+			ei.closeTab(page, flag, done)
+			return
+		}
+		html, _ := page.HTML()
+		if strings.Contains(info.Title, "404") || static.Match404ResponsePage([]byte(html)) {
+			ei.closeTab(page, flag, done)
 			return
 		}
 		// 调试模式 手动去操作 停止所有
 		if conf.GlobalConfig.Dev {
+			ei.closeTab(page, flag, done)
 			return
 		}
-		defer page.Close()
 		if err != nil {
 			log.Logger.Errorf("page %s error: %s  sourceType: %s sourceUrl: %s", uif.Url, err, uif.SourceType, uif.SourceUrl)
+			ei.closeTab(page, flag, done)
 			return
 		}
 		if flag == 0 {
@@ -65,7 +75,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, flag int) {
 		}
 		if conf.GlobalConfig.TestPlayBack {
 			time.Sleep(time.Duration(conf.GlobalConfig.BrowserConf.TabTimeout) * time.Second)
-			ei.CloseChan <- flag
+			ei.closeTab(page, flag, done)
 			return
 		}
 		// 设置超时时间
@@ -95,14 +105,13 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, flag int) {
 		// 执行自动化触发事件 输入 点击等 auto
 		hrefList := inject.Auto(page)
 		// auto 触发后 获取下当前url
-		info, err = page.Info()
+		info, err = utils.GetPageInfoByPage(page)
 		var currentUrl = ""
 		if err != nil {
-			log.Logger.Errorf("page get info err:%s  %s", err, uif.Url)
+			log.Logger.Debugf("page timeout:%s  %s", err, uif.Url)
 		} else {
 			currentUrl = info.URL
 		}
-		// log.Logger.Debugf("auto %s ->hrefList: %s", uif.Url, hrefList)
 		// 解析demo
 		for _, staticUrl := range hrefList {
 			PushUrlWg.Add(1)
@@ -120,23 +129,29 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, flag int) {
 				PushStaticUrl(&UrlInfo{Url: info.URL, SourceType: "patch", SourceUrl: uif.Url})
 			}(currentUrl)
 		}
-		log.Logger.Debugf("[close tab ] => %s", uif.Url)
-
-		if flag == 0 {
-			ei.CloseChan <- flag
-		}
 		// 所有url提交完成才能结束
 		PushUrlWg.Wait()
-	})
+		ei.closeTab(page, flag, done)
+
+	}() // 协程
+	// 阻塞超时控制
+	select {
+	case <-done:
+		log.Logger.Debugf("[close tab ] => %s", uif.Url)
+	case <-time.After(time.Duration(conf.GlobalConfig.BrowserConf.TabTimeout) * time.Second):
+		log.Logger.Warnf("[timeout tab ] => %s", uif.Url)
+		ei.closeTab(nil, flag, done)
+	}
 }
 
 // 接收所有静态url 来处理
 var urlsQueue chan *UrlInfo
 var tabQueue chan *UrlInfo
 
-func (ei *EngineInfo) InitController() {
+func (ei *EngineInfo) InitTabPool() {
 	urlsQueue = make(chan *UrlInfo, 10000)
 	tabQueue = make(chan *UrlInfo, conf.GlobalConfig.BrowserConf.TabCount)
+	TabLimit = make(chan int, conf.GlobalConfig.BrowserConf.TabCount)
 	go ei.StaticUrlWork()
 	go ei.TabWork()
 }
@@ -153,7 +168,8 @@ func PushTabQueue(uif *UrlInfo) {
 func (ei *EngineInfo) TabWork() {
 	for {
 		uif := <-tabQueue
-		ei.NewTab(uif, 1)
+		TabWg.Add(1)
+		go ei.NewTab(uif, 1)
 	}
 }
 

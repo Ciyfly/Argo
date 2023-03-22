@@ -13,6 +13,7 @@ import (
 
 var PendingNormalizeQueue chan *PendingUrl
 var NormalizeCloseChan chan int
+var NormalizeCloseChanFlag bool
 var NormalizeationResultMap map[string]int
 var NormalizeationStaticMap map[string]int
 
@@ -33,6 +34,7 @@ func InitNormalize() {
 	NormalizeCloseChan = make(chan int)
 	NormalizeationResultMap = make(map[string]int)
 	NormalizeationStaticMap = make(map[string]int)
+	NormalizeCloseChanFlag = false
 	go normalizeWork()
 }
 
@@ -123,6 +125,7 @@ func urlIsExists(target string) bool {
 }
 
 func CloseNormalizeQueue() {
+	NormalizeCloseChanFlag = true
 	close(PendingNormalizeQueue)
 }
 

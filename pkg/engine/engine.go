@@ -151,7 +151,9 @@ func (ei *EngineInfo) Start() {
 					RequestStr:      utils.EncodeBase64(reqBytes),
 					Status:          ctx.Response.Payload().ResponseCode,
 				}
-				pushpendingNormalizeQueue(pu)
+				if !NormalizeCloseChanFlag {
+					pushpendingNormalizeQueue(pu)
+				}
 			}
 		}
 

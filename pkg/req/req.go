@@ -41,14 +41,13 @@ func CheckTarget(target string) bool {
 	}
 	resp, err := client.Do(request)
 	if err != nil {
-		log.Logger.Errorf("req error: %s", err)
+		log.Logger.Debugf("req error: %s", err)
 		return false
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusOK {
 		return true
 	}
-	log.Logger.Error("req !!!!: ")
 	return false
 }
 

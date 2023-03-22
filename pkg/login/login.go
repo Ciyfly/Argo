@@ -3,6 +3,7 @@ package login
 import (
 	"argo/pkg/conf"
 	"argo/pkg/log"
+	"argo/pkg/utils"
 	"strings"
 
 	"github.com/go-rod/rod"
@@ -32,13 +33,12 @@ func parse(page *rod.Page) bool {
 		return false
 	}
 	html, _ := page.HTML()
-	info, err := page.Info()
+	info, err := utils.GetPageInfoByPage(page)
 	if err != nil {
 		return false
 	}
 	url := info.URL
 	title := info.Title
-	// gologger.Info().Msgf("[Title]=>[%s] %s", title, url)
 	if strings.Contains(strings.ToLower(url), "/login") {
 		return true
 	}
@@ -59,11 +59,19 @@ func (lp *LoginAutoData) Handler(page *rod.Page) {
 	// 判断这个页面是否需要登录
 	if parse(page) {
 		// 需要登录 自动化匹配输入框和提交框
-		log.Logger.Debugf("try login %s", page.MustInfo().URL)
+		currentUrl, err := utils.GetCurrentUrlByPage(page)
+		if err != nil {
+			return
+		}
+		log.Logger.Debugf("try login %s", currentUrl)
 		// 自动匹配输入框和密码框测试登录
 		lp.Page = page
 		lp.tryLogin()
 	} else {
-		log.Logger.Debugf("It did not recognize that login was required %s", page.MustInfo().URL)
+		currentUrl, err := utils.GetCurrentUrlByPage(page)
+		if err != nil {
+			return
+		}
+		log.Logger.Debugf("It did not recognize that login was required %s", currentUrl)
 	}
 }

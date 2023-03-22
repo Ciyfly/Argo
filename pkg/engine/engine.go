@@ -5,16 +5,16 @@ import (
 	"argo/pkg/inject"
 	"argo/pkg/log"
 	"argo/pkg/login"
-	"argo/pkg/static/files"
+	"argo/pkg/static"
 	"argo/pkg/utils"
 	"bytes"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -23,15 +23,14 @@ import (
 )
 
 type EngineInfo struct {
-	Browser    *rod.Browser
-	Options    conf.BrowserConf
-	Launcher   *launcher.Launcher
-	CloseChan  chan int
-	Target     string
-	Host       string
-	HostName   string
-	TabCount   int
-	KnownFiles *files.KnownFiles // 从 robots.txt|sitemap.xml 获取路径
+	Browser   *rod.Browser
+	Options   conf.BrowserConf
+	Launcher  *launcher.Launcher
+	CloseChan chan int
+	Target    string
+	Host      string
+	HostName  string
+	TabCount  int
 }
 
 type UrlInfo struct {
@@ -52,14 +51,12 @@ func InitEngine(target string) *EngineInfo {
 	InitNormalize()
 	// 初始化 结果处理模块
 	InitResultHandler()
-	// 初始化tab控制携程池
-	InitTabPool()
 	// 初始化静态资源过滤
 	InitFilter()
 	// 初始化浏览器
 	engineInfo := InitBrowser(target)
-	// 初始化 urls队列 tab新建
-	engineInfo.InitController()
+	// 初始化tab控制携程池
+	engineInfo.InitTabPool()
 	return engineInfo
 }
 
@@ -85,30 +82,21 @@ func InitBrowser(target string) *EngineInfo {
 	closeChan := make(chan int, 1)
 	u, _ := url.Parse(target)
 
-	var knownFiles *files.KnownFiles
-	httpclient, err := utils.BuildHttpClient(conf.GlobalConfig.BrowserConf.Proxy, nil)
-	if err != nil {
-		log.Logger.Errorln("ould not create http client")
-
-	} else {
-		knownFiles = files.New(httpclient)
-	}
-
 	return &EngineInfo{
-		Browser:    browser,
-		Options:    conf.GlobalConfig.BrowserConf,
-		Launcher:   options,
-		CloseChan:  closeChan,
-		Target:     target,
-		Host:       u.Host,
-		HostName:   u.Hostname(),
-		KnownFiles: knownFiles,
+		Browser:   browser,
+		Options:   conf.GlobalConfig.BrowserConf,
+		Launcher:  options,
+		CloseChan: closeChan,
+		Target:    target,
+		Host:      u.Host,
+		HostName:  u.Hostname(),
 	}
 }
 
 func (ei *EngineInfo) Start() {
-	log.Logger.Debugf("tab timeout: %d", conf.GlobalConfig.BrowserConf.TabTimeout)
-	log.Logger.Debugf("browser timeout: %d", conf.GlobalConfig.BrowserConf.BrowserTimeout)
+	log.Logger.Debugf("tab timeout: %ds", conf.GlobalConfig.BrowserConf.TabTimeout)
+	log.Logger.Debugf("browser timeout: %ds", conf.GlobalConfig.BrowserConf.BrowserTimeout)
+	log.Logger.Debugf("tab controller count: %d", conf.GlobalConfig.BrowserConf.TabCount)
 	// hook 请求响应获取所有异步请求
 	router := ei.Browser.HijackRequests()
 	defer router.Stop()
@@ -127,29 +115,40 @@ func (ei *EngineInfo) Start() {
 
 		// 防止空指针
 		if ctx.Request.Req() != nil && ctx.Request.Req().URL != nil {
+
 			// 优化, 先判断,再组合
 			if strings.Contains(ctx.Request.URL().String(), ei.HostName) {
-				if ctx.Response.Payload().ResponseCode == 404 {
-					return
+				var save, body io.ReadCloser
+				var saveBytes, reqBytes []byte
+				reqBytes, _ = httputil.DumpRequest(ctx.Request.Req(), true)
+				// fix 20230320 body nil copy处理会导致 nginx 411 问题 只有当post才进行处理
+				// https://open.baidu.com/
+				if ctx.Request.Method() == http.MethodPost {
+					save, body, _ = copyBody(ctx.Request.Req().Body)
+					saveBytes, _ = ioutil.ReadAll(save)
 				}
-
-				var reqStr []byte
-				fmt.Println(ctx.Request.Req().URL)
-				reqStr, _ = httputil.DumpRequest(ctx.Request.Req(), true)
-				save, body, _ := copyBody(ctx.Request.Req().Body)
-				saveStr, _ := ioutil.ReadAll(save)
 				ctx.Request.Req().Body = body
 				ctx.LoadResponse(http.DefaultClient, true)
-
+				// load 后才有响应相关
+				if ctx.Response.Payload().ResponseCode == http.StatusNotFound {
+					return
+				}
+				// 先简单的通过关键字匹配 404页面
+				if ctx.Response.Payload().Body != nil {
+					if static.Match404ResponsePage(reqBytes) {
+						log.Logger.Warnf("404 response: %s", ctx.Request.URL().String())
+						return
+					}
+				}
 				pu := &PendingUrl{
 					URL:             ctx.Request.URL().String(),
 					Method:          ctx.Request.Method(),
 					Host:            ctx.Request.Req().Host,
 					Headers:         ctx.Request.Req().Header,
-					Data:            string(saveStr),
+					Data:            string(saveBytes),
 					ResponseHeaders: transformHttpHeaders(ctx.Response.Payload().ResponseHeaders),
 					ResponseBody:    utils.EncodeBase64(ctx.Response.Payload().Body),
-					RequestStr:      utils.EncodeBase64(reqStr),
+					RequestStr:      utils.EncodeBase64(reqBytes),
 					Status:          ctx.Response.Payload().ResponseCode,
 				}
 				pushpendingNormalizeQueue(pu)
@@ -158,25 +157,21 @@ func (ei *EngineInfo) Start() {
 
 	})
 	go router.Run()
-
-	if ei.KnownFiles != nil {
-		knownFiles, err := ei.KnownFiles.Request(ei.Target)
-		if err != nil {
-			log.Logger.Errorf("Could not parse known files for %s: %s\n", ei.Target, err)
-		}
-
-		for _, staticUrl := range knownFiles {
-			fmt.Println(staticUrl)
-			PushUrlWg.Add(1)
-			go func(staticUrl string) {
-				defer PushUrlWg.Done()
-				PushStaticUrl(&UrlInfo{Url: staticUrl, SourceType: "static parse", SourceUrl: "robots.txt|sitemap.xml"})
-			}(staticUrl)
-		}
+	var metadataWg sync.WaitGroup
+	metadataList := static.MetaDataSpider(ei.Target)
+	for _, staticUrl := range metadataList {
+		metadataWg.Add(1)
+		log.Logger.Debugf("metadata parse: %s", staticUrl)
+		go func(staticUrl string) {
+			defer metadataWg.Done()
+			PushStaticUrl(&UrlInfo{Url: staticUrl, SourceType: "metadata parse", SourceUrl: "robots.txt|sitemap.xml"})
+		}(staticUrl)
 	}
-
+	metadataWg.Wait()
 	// 打开第一个tab页面 这里应该提交url管道任务
-	ei.NewTab(&UrlInfo{Url: ei.Target}, 0)
+	TabWg.Add(1)
+	go ei.NewTab(&UrlInfo{Url: ei.Target}, 0)
+	// 元数据文件 rotbots.txt sitemap.xml
 	// 结束
 	// 0. 首页解析完成
 	// 1. url管道没有数据
@@ -187,11 +182,10 @@ func (ei *EngineInfo) Start() {
 		select {}
 	}
 	<-ei.CloseChan
-	log.Logger.Debug("front page over")
+	log.Logger.Debug("first page over")
 	urlsQueueEmpty()
 	log.Logger.Debug("urlsQueueEmpty over")
 	TabWg.Wait()
-	TabPool.Release()
 	log.Logger.Debug("tabPool over")
 	if ei.Browser != nil {
 		closeErr := ei.Browser.Close()

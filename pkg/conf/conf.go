@@ -26,8 +26,8 @@ browser:
   trace: false # 有界面时显示点击了哪些
   tabcount: 10 # 最多开启多个tab页面
   proxy: ""
-  tabtimeout: 180 # tab页面最长时间
-  browsertimeout: 36000 # 浏览器运行最长时间
+  tabtimeout: 30 # tab页面最长时间
+  browsertimeout: 186000 # 浏览器运行最长时间
 auto:
   slow: 1000 # 事件触发的延迟时间
   filter: ["lougout", "登出", "reset"] # 包含这种字符的就不进行触发事件

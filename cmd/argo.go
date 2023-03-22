@@ -4,13 +4,12 @@ import (
 	"argo/pkg/conf"
 	"argo/pkg/engine"
 	"argo/pkg/log"
-	"argo/pkg/utils"
+	"argo/pkg/req"
 	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"github.com/projectdiscovery/gologger"
 	cli "github.com/urfave/cli/v2"
 )
 
@@ -106,12 +105,12 @@ func main() {
 		},
 		&cli.IntFlag{
 			Name:  "tabtimeout",
-			Value: 180,
+			Value: 30,
 			Usage: "Set the maximum running time for the tab, and close the tab if it exceeds the limit. The unit is in seconds",
 		},
 		&cli.IntFlag{
 			Name:  "browsertimeout",
-			Value: 3600,
+			Value: 18000,
 			Usage: "Set the maximum running time for the browser, and close the browser if it exceeds the limit. The unit is in seconds",
 		},
 		&cli.StringFlag{
@@ -138,7 +137,7 @@ func main() {
 
 	err := app.Run(os.Args)
 	if err != nil {
-		gologger.Fatal().Msgf("cli.RunApp err: %s", err.Error())
+		fmt.Printf("cli.RunApp err: %s\n", err.Error())
 		return
 	}
 }
@@ -160,7 +159,7 @@ func RunMain(c *cli.Context) error {
 	// 浏览器引擎初始化
 	for _, t := range conf.GlobalConfig.TargetList {
 		log.Logger.Infof("target: %s", t)
-		if !utils.CheckTarget(t) {
+		if !req.CheckTarget(t) {
 			log.Logger.Errorf("The target is inaccessible %s", t)
 			continue
 		}

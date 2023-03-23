@@ -95,7 +95,7 @@ func main() {
 		&cli.StringFlag{
 			Name:  "proxy",
 			Value: "",
-			Usage: "Set up a proxy, for example, 127.0.0.1:3128",
+			Usage: "Set up a proxy, for example, http://127.0.0.1:3128",
 		},
 		&cli.IntFlag{
 			Name:    "tabcount",

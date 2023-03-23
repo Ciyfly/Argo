@@ -21,7 +21,7 @@ Support is as follows
 You can download the latest version directly from here https://github.com/Ciyfly/Argo/releases
 No need to manually download chrome, run the program directly and it will automatically download chrome
 
-```shell
+```yaml
 ./argo -h
 NAME:
    argo -  -t http://testphp.vulnweb.com/
@@ -30,7 +30,7 @@ USAGE:
    argo [global options] command [command options] [arguments...]
 
 VERSION:
-   0.1
+   1.0
 
 AUTHOR:
    Recar <https://github.com/Ciyfly>
@@ -50,13 +50,14 @@ GLOBAL OPTIONS:
    --phone value                  If logging in, the default phone (default: "18888888888")
    --playback value               Support replay like headless YAML scripts
    --testplayback                 If opened, then directly end after executing the specified playback script (default: false)
-   --proxy value                  Set up a proxy, for example, 127.0.0.1:3128
+   --proxy value                  Set up a proxy, for example, http://127.0.0.1:3128
    --tabcount value, -c value     The maximum number of tab pages that can be opened (default: 10)
-   --tabtimeout value             Set the maximum running time for the tab, and close the tab if it exceeds the limit. The unit is in seconds (default: 180)
-   --browsertimeout value         Set the maximum running time for the browser, and close the browser if it exceeds the limit. The unit is in seconds (default: 3600)
+   --tabtimeout value             Set the maximum running time for the tab, and close the tab if it exceeds the limit. The unit is in seconds (default: 30)
+   --browsertimeout value         Set the maximum running time for the browser, and close the browser if it exceeds the limit. The unit is in seconds (default: 18000)
    --save value                   The default name for the saved result is 'target' without a file extension. For example, to save as 'test', use the command '--save test'
    --format value                 Result output format separated by commas, multiple formats can be output at one time, and the supported formats include txt, json, xlsx, and html (default: "txt,json")
    --debug                        Do you want to output debug information? (default: false)
+   --dev                          Enable dev mode. This will activate the browser interface mode and stop after accessing the page for development and debugging purposes (default: false)
    --help, -h                     show help
    --version, -v                  print the version
 ```
@@ -75,6 +76,12 @@ GLOBAL OPTIONS:
 
 ```shell
 ./argo -t http://192.168.192.128:8080/ -u admin -p password
+```
+
+### use proxy
+
+```shell
+./argo -t http://testphp.vulnweb.com/ --format txt --proxy http://127.0.0.1:3128
 ```
 
 
@@ -100,7 +107,7 @@ http://192.168.192.128:8080/
 ```
 
 
-### 支持控制事件触发间隔 --slow
+### Support control event trigger interval --slow
 The default is 1000ms, that is, 1s event. If input is clicked, it will wait for the interval time before continuing to trigger
 
 ```shell

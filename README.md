@@ -21,7 +21,7 @@
 可以直接从这里下载最新版 https://github.com/Ciyfly/Argo/releases
 不需要手动下载 chrome 直接运行程序会自动下载chrome
 
-```shell
+```yaml
 ./argo -h
 NAME:
    argo -  -t http://testphp.vulnweb.com/
@@ -30,7 +30,7 @@ USAGE:
    argo [global options] command [command options] [arguments...]
 
 VERSION:
-   0.1
+   1.0
 
 AUTHOR:
    Recar <https://github.com/Ciyfly>
@@ -50,16 +50,16 @@ GLOBAL OPTIONS:
    --phone value                  If logging in, the default phone (default: "18888888888")
    --playback value               Support replay like headless YAML scripts
    --testplayback                 If opened, then directly end after executing the specified playback script (default: false)
-   --proxy value                  Set up a proxy, for example, 127.0.0.1:3128
+   --proxy value                  Set up a proxy, for example, http://127.0.0.1:3128
    --tabcount value, -c value     The maximum number of tab pages that can be opened (default: 10)
-   --tabtimeout value             Set the maximum running time for the tab, and close the tab if it exceeds the limit. The unit is in seconds (default: 180)
-   --browsertimeout value         Set the maximum running time for the browser, and close the browser if it exceeds the limit. The unit is in seconds (default: 3600)
+   --tabtimeout value             Set the maximum running time for the tab, and close the tab if it exceeds the limit. The unit is in seconds (default: 30)
+   --browsertimeout value         Set the maximum running time for the browser, and close the browser if it exceeds the limit. The unit is in seconds (default: 18000)
    --save value                   The default name for the saved result is 'target' without a file extension. For example, to save as 'test', use the command '--save test'
    --format value                 Result output format separated by commas, multiple formats can be output at one time, and the supported formats include txt, json, xlsx, and html (default: "txt,json")
    --debug                        Do you want to output debug information? (default: false)
+   --dev                          Enable dev mode. This will activate the browser interface mode and stop after accessing the page for development and debugging purposes (default: false)
    --help, -h                     show help
    --version, -v                  print the version
-
 ```
 
 ## 运行
@@ -80,6 +80,11 @@ GLOBAL OPTIONS:
 
 ![](imgs/dvwa.gif)
 
+### 配置代理
+
+```shell
+./argo -t http://testphp.vulnweb.com/ --format txt --proxy http://127.0.0.1:3128
+```
 
 ### 使用 playback 实现dvwa的登录  
 

@@ -78,6 +78,13 @@ func InitBrowser(target string) *EngineInfo {
 		options = options.Delete("--headless")
 		browser = browser.SlowMotion(time.Duration(conf.GlobalConfig.AutoConf.Slow) * time.Second)
 	}
+	if conf.GlobalConfig.BrowserConf.Proxy != "" {
+		proxyURL, err := url.Parse(conf.GlobalConfig.BrowserConf.Proxy)
+		if err != nil {
+			log.Logger.Fatal("proxy err:", err)
+		}
+		options.Set("proxy-server", proxyURL.String())
+	}
 	browser = browser.ControlURL(options.MustLaunch()).MustConnect().NoDefaultDevice().MustIncognito()
 	closeChan := make(chan int, 1)
 	u, _ := url.Parse(target)
@@ -94,6 +101,9 @@ func InitBrowser(target string) *EngineInfo {
 }
 
 func (ei *EngineInfo) Start() {
+	if conf.GlobalConfig.BrowserConf.Proxy != "" {
+		log.Logger.Debugf("proxy: %s", conf.GlobalConfig.BrowserConf.Proxy)
+	}
 	log.Logger.Debugf("tab timeout: %ds", conf.GlobalConfig.BrowserConf.TabTimeout)
 	log.Logger.Debugf("browser timeout: %ds", conf.GlobalConfig.BrowserConf.BrowserTimeout)
 	log.Logger.Debugf("tab controller count: %d", conf.GlobalConfig.BrowserConf.TabCount)

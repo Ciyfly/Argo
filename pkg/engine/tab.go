@@ -45,6 +45,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, flag int) {
 	go func() {
 		// 创建tab
 		page, err := ei.Browser.Page(proto.TargetCreateTarget{URL: uif.Url})
+		// log.Logger.Debug(page.HTML())
 		info, err := utils.GetPageInfoByPage(page)
 		if err != nil {
 			// 超时干掉了page

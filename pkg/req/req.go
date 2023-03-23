@@ -4,11 +4,14 @@ import (
 	"argo/pkg/conf"
 	"argo/pkg/log"
 	"crypto/tls"
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"golang.org/x/net/proxy"
 )
 
 // WebUserAgent returns the chrome-web user agent
@@ -85,4 +88,51 @@ func AbsoluteURL(path, scheme string) string {
 
 	final := absURL.String()
 	return final
+}
+
+func GetProxyClient() *http.Client {
+	httpClient := http.Client{}
+	var auth string
+	var proxySorted []string
+
+	proxySorted = strings.Split(conf.GlobalConfig.BrowserConf.Proxy, ":")
+
+	if strings.Contains(conf.GlobalConfig.BrowserConf.Proxy, "http") {
+		proxyURL, _ := url.Parse(conf.GlobalConfig.BrowserConf.Proxy)
+		if len(proxySorted) > 3 {
+			// 有用户名密码
+			auth = strings.Split(proxySorted[1], "//")[1] + ":" + strings.Split(proxySorted[2], "@")[0]
+			basicAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte(auth))
+			hdr := http.Header{}
+			hdr.Add("Proxy-Authorization", basicAuth)
+			transport := &http.Transport{
+				Proxy:              http.ProxyURL(proxyURL),
+				ProxyConnectHeader: hdr,
+				IdleConnTimeout:    5 * time.Second,
+			}
+			httpClient.Transport = transport
+		} else {
+			transport := &http.Transport{
+				Proxy: http.ProxyURL(proxyURL),
+			}
+			httpClient.Transport = transport
+		}
+		return &httpClient
+	} else {
+		var auth *proxy.Auth
+		if len(proxySorted) > 3 {
+			auth = &proxy.Auth{
+				User:     strings.Split(proxySorted[1], "//")[1],
+				Password: strings.Split(proxySorted[2], "@")[0],
+			}
+		}
+		dialer, err := proxy.SOCKS5("tcp", "PROXY_IP", auth, proxy.Direct)
+		if err != nil {
+			log.Logger.Errorf("proxt socks err: %s", err)
+		}
+		tr := &http.Transport{Dial: dialer.Dial}
+		return &http.Client{
+			Transport: tr,
+		}
+	}
 }

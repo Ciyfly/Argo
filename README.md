@@ -84,6 +84,7 @@ GLOBAL OPTIONS:
 
 ```shell
 ./argo -t http://testphp.vulnweb.com/ --format txt --proxy http://127.0.0.1:3128
+./argo -t http://testphp.vulnweb.com/ --format txt --proxy http://username:password@127.0.0.1:3128
 ```
 
 ### 使用 playback 实现dvwa的登录  

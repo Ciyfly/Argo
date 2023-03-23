@@ -5,6 +5,7 @@ import (
 	"argo/pkg/inject"
 	"argo/pkg/log"
 	"argo/pkg/login"
+	"argo/pkg/req"
 	"argo/pkg/static"
 	"argo/pkg/utils"
 	"bytes"
@@ -83,7 +84,7 @@ func InitBrowser(target string) *EngineInfo {
 		if err != nil {
 			log.Logger.Fatal("proxy err:", err)
 		}
-		options.Set("proxy-server", proxyURL.String())
+		options.Proxy(proxyURL.String())
 	}
 	browser = browser.ControlURL(options.MustLaunch()).MustConnect().NoDefaultDevice().MustIncognito()
 	closeChan := make(chan int, 1)
@@ -101,6 +102,7 @@ func InitBrowser(target string) *EngineInfo {
 }
 
 func (ei *EngineInfo) Start() {
+	var reqClient *http.Client
 	if conf.GlobalConfig.BrowserConf.Proxy != "" {
 		log.Logger.Debugf("proxy: %s", conf.GlobalConfig.BrowserConf.Proxy)
 	}
@@ -138,7 +140,12 @@ func (ei *EngineInfo) Start() {
 					saveBytes, _ = ioutil.ReadAll(save)
 				}
 				ctx.Request.Req().Body = body
-				ctx.LoadResponse(http.DefaultClient, true)
+				if conf.GlobalConfig.BrowserConf.Proxy != "" {
+					reqClient = req.GetProxyClient()
+				} else {
+					reqClient = http.DefaultClient
+				}
+				ctx.LoadResponse(reqClient, true)
 				// load 后才有响应相关
 				if ctx.Response.Payload().ResponseCode == http.StatusNotFound {
 					return

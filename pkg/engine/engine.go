@@ -157,6 +157,10 @@ func (ei *EngineInfo) Start() {
 						return
 					}
 				}
+				// fix 管道关闭了但是还推数据的问题
+				if NormalizeCloseChanFlag {
+					return
+				}
 				pu := &PendingUrl{
 					URL:             ctx.Request.URL().String(),
 					Method:          ctx.Request.Method(),
@@ -164,13 +168,14 @@ func (ei *EngineInfo) Start() {
 					Headers:         ctx.Request.Req().Header,
 					Data:            string(saveBytes),
 					ResponseHeaders: transformHttpHeaders(ctx.Response.Payload().ResponseHeaders),
-					ResponseBody:    utils.EncodeBase64(ctx.Response.Payload().Body),
-					RequestStr:      utils.EncodeBase64(reqBytes),
 					Status:          ctx.Response.Payload().ResponseCode,
 				}
-				if !NormalizeCloseChanFlag {
-					pushpendingNormalizeQueue(pu)
+				// update 优化可以不存储请求响应的字符串来优化内存性能
+				if !conf.GlobalConfig.NoReqRspStr {
+					pu.ResponseBody = utils.EncodeBase64(ctx.Response.Payload().Body)
+					pu.RequestStr = utils.EncodeBase64(reqBytes)
 				}
+				pushpendingNormalizeQueue(pu)
 			}
 		}
 

@@ -43,6 +43,7 @@ type Conf struct {
 	TestPlayBack     bool
 	TargetList       []string
 	Dev              bool
+	NoReqRspStr      bool
 }
 
 // 保存的格式
@@ -141,6 +142,9 @@ func MergeArgs(c *cli.Context) {
 	// debug dev
 	devMode := c.Bool("dev")
 
+	// 优化控制
+	norrs := c.Bool("norrs")
+
 	// 目标
 	if target != "" {
 		GlobalConfig.TargetList = append(GlobalConfig.TargetList, target)
@@ -209,4 +213,7 @@ func MergeArgs(c *cli.Context) {
 
 	//dev
 	GlobalConfig.Dev = devMode
+
+	// 优化控制
+	GlobalConfig.NoReqRspStr = norrs
 }

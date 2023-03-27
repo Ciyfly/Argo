@@ -6,9 +6,12 @@ import (
 	"argo/pkg/log"
 	"argo/pkg/req"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+
+	_ "net/http/pprof"
 
 	cli "github.com/urfave/cli/v2"
 )
@@ -26,6 +29,9 @@ func SetupCloseHandler() {
 }
 
 func main() {
+	go func() {
+		http.ListenAndServe("0.0.0.0:6060", nil)
+	}()
 	SetupCloseHandler()
 	app := cli.NewApp()
 	app.Name = "argo"
@@ -131,6 +137,11 @@ func main() {
 			Name:  "dev",
 			Value: false,
 			Usage: "Enable dev mode. This will activate the browser interface mode and stop after accessing the page for development and debugging purposes",
+		},
+		&cli.BoolFlag{
+			Name:  "norrs",
+			Value: true,
+			Usage: "There is no storage request response string, which can save memory and is suitable for a large number of scans",
 		},
 	}
 	app.Action = RunMain

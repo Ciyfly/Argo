@@ -39,6 +39,7 @@ type UrlInfo struct {
 	SourceType string
 	Match      string
 	SourceUrl  string
+	Depth      int
 }
 
 // var EngineInfoData *EngineInfo
@@ -188,13 +189,13 @@ func (ei *EngineInfo) Start() {
 		log.Logger.Debugf("metadata parse: %s", staticUrl)
 		go func(staticUrl string) {
 			defer metadataWg.Done()
-			PushStaticUrl(&UrlInfo{Url: staticUrl, SourceType: "metadata parse", SourceUrl: "robots.txt|sitemap.xml"})
+			PushStaticUrl(&UrlInfo{Url: staticUrl, SourceType: "metadata parse", SourceUrl: "robots.txt|sitemap.xml", Depth: 0})
 		}(staticUrl)
 	}
 	metadataWg.Wait()
 	// 打开第一个tab页面 这里应该提交url管道任务
 	TabWg.Add(1)
-	go ei.NewTab(&UrlInfo{Url: ei.Target}, 0)
+	go ei.NewTab(&UrlInfo{Url: ei.Target, Depth: 0}, 0)
 	// 元数据文件 rotbots.txt sitemap.xml
 	// 结束
 	// 0. 首页解析完成

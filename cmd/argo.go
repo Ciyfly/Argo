@@ -5,6 +5,7 @@ import (
 	"argo/pkg/engine"
 	"argo/pkg/log"
 	"argo/pkg/req"
+	"argo/pkg/updateself"
 	"fmt"
 	"net/http"
 	"os"
@@ -35,6 +36,7 @@ const (
 	ConfigArgsGroup         = "Config"
 	OutPutArgsGroup         = "OutPut"
 	DebugArgsGroup          = "Debug"
+	UpdateArgsGroup         = "Update"
 )
 
 func main() {
@@ -178,6 +180,12 @@ func main() {
 			Usage:    "Scrape the web content with increasing depth by crawling each URL based on the last one, and incrementing the current depth by 1 relative to the previous depth. Stop crawling once the maximum depth is reached.",
 			Category: ConfigArgsGroup,
 		},
+		&cli.BoolFlag{
+			Name:     "update",
+			Value:    false,
+			Usage:    "update self",
+			Category: UpdateArgsGroup,
+		},
 	}
 	app.Action = RunMain
 
@@ -189,6 +197,11 @@ func main() {
 }
 
 func RunMain(c *cli.Context) error {
+	update := c.Bool("update")
+	if update {
+		updateself.CheckIfUpgradeRequired(Version)
+		return nil
+	}
 	target := c.String("target")
 	targetsFile := c.String("targetsfile")
 	if target == "" && targetsFile == "" {

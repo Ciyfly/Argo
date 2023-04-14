@@ -161,7 +161,7 @@ func Auto(page *rod.Page) []string {
 		conf.GlobalConfig.LoginConf.Email,
 		conf.GlobalConfig.LoginConf.Phone,
 		conf.GlobalConfig.AutoConf.Slow,
-		strings.Join(conf.GlobalConfig.AutoConf.Fliter, ","))
+		strings.Join(conf.GlobalConfig.AutoConf.Filter, ","))
 	info, err := utils.GetPageInfoByPage(page)
 	if err != nil {
 		return nil

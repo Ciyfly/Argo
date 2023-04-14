@@ -6,12 +6,13 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"path"
 	"strings"
 
-	"github.com/spf13/viper"
 	"github.com/urfave/cli/v2"
+	"gopkg.in/yaml.v3"
 )
 
 var GlobalConfig *Conf
@@ -27,16 +28,18 @@ browser:
   tabcount: 10 # 最多开启多个tab页面
   proxy: ""
   tabtimeout: 30 # tab页面最长时间
-  browsertimeout: 186000 # 浏览器运行最长时间
+  browsertimeout: 18000 # 浏览器运行最长时间
+  maxdepth: 10 # 爬行最大深度
 auto:
   slow: 1000 # 事件触发的延迟时间
   filter: ["lougout", "登出", "reset"] # 包含这种字符的就不进行触发事件
+
 `
 
 type Conf struct {
-	LoginConf        LoginConf   `mapstructure:"login"`
-	BrowserConf      BrowserConf `mapstructure:"browser"`
-	AutoConf         AutoConf    `mapstructure:"auto"`
+	LoginConf        LoginConf   `yaml:"login"`
+	BrowserConf      BrowserConf `yaml:"browser"`
+	AutoConf         AutoConf    `yaml:"auto"`
 	InjectScriptPath string
 	ResultConf       ResultConf
 	PlaybackPath     string
@@ -54,41 +57,42 @@ type ResultConf struct {
 
 // 默认的用户名密码
 type LoginConf struct {
-	Username string
-	Password string
-	Email    string
-	Phone    string
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
+	Email    string `yaml:"email"`
+	Phone    string `yaml:"phone"`
 }
 
 // 浏览器参数
 type BrowserConf struct {
-	UnHeadless     bool
-	Trace          bool
-	TabCount       int
-	Proxy          string
-	TabTimeout     int
-	BrowserTimeout int
+	UnHeadless     bool   `yaml:"unheadless"`
+	Trace          bool   `yaml:"trace"`
+	TabCount       int    `yaml:"tab_count"`
+	Proxy          string `yaml:"proxy"`
+	TabTimeout     int    `yaml:"tab_timeout"`
+	BrowserTimeout int    `yaml:"browser_timeout"`
+	MaxDepth       int    `yaml:"max_depth"`
 }
 
 // auto 自动触发的一些参数
 type AutoConf struct {
-	Slow   float64
-	Fliter []string
+	Slow   float64  `yaml:"slow"`
+	Filter []string `yaml:"filter"`
 }
 
 func readYamlConfig(configFile string) {
 	// 加载config
-	viper.SetConfigType("yaml")
-	viper.SetConfigFile(configFile)
 
-	err := viper.ReadInConfig()
+	yamlFile, err := ioutil.ReadFile(configFile)
 	if err != nil {
 		fmt.Printf("load config, fail to read 'config.yaml': %v\n", err)
 	}
-	err = viper.Unmarshal(&GlobalConfig)
+	GlobalConfig = &Conf{}
+	err = yaml.Unmarshal(yamlFile, GlobalConfig)
 	if err != nil {
 		fmt.Printf("load config, fail to parse 'config.yaml', check format: %v\n", err)
 	}
+
 }
 
 func InitConfig() {
@@ -144,6 +148,7 @@ func MergeArgs(c *cli.Context) {
 
 	// 优化控制
 	norrs := c.Bool("norrs")
+	maxDepth := c.Int("maxdepth")
 
 	// 目标
 	if target != "" {
@@ -216,4 +221,6 @@ func MergeArgs(c *cli.Context) {
 
 	// 优化控制
 	GlobalConfig.NoReqRspStr = norrs
+	GlobalConfig.BrowserConf.MaxDepth = maxDepth
+
 }

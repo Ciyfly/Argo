@@ -29,12 +29,12 @@ func SetupCloseHandler() {
 }
 
 const (
-	UseArgsGroup    string = "Use"
-	BrowerArgsGroup        = "Brower"
-	DataArgsGroup          = "Data"
-	ConfigArgsGroup        = "Config"
-	OutPutArgsGroup        = "OutPut"
-	DebugArgsGroup         = "Debug"
+	UseArgsGroup     string = "Use"
+	BrowserArgsGroup        = "Browser"
+	DataArgsGroup           = "Data"
+	ConfigArgsGroup         = "Config"
+	OutPutArgsGroup         = "OutPut"
+	DebugArgsGroup          = "Debug"
 )
 
 func main() {
@@ -74,13 +74,13 @@ func main() {
 			Name:     "trace",
 			Value:    false,
 			Usage:    "Whether to display the elements of operation after opening the interface",
-			Category: BrowerArgsGroup,
+			Category: BrowserArgsGroup,
 		},
 		&cli.Float64Flag{
 			Name:     "slow",
 			Value:    1000,
 			Usage:    "The default delay time for operating after enabling ",
-			Category: BrowerArgsGroup,
+			Category: BrowserArgsGroup,
 		},
 		&cli.StringFlag{
 			Name:     "username",
@@ -171,6 +171,12 @@ func main() {
 			Value:    true,
 			Usage:    "There is no storage request response string, which can save memory and is suitable for a large number of scans",
 			Category: UseArgsGroup,
+		},
+		&cli.IntFlag{
+			Name:     "maxdepth",
+			Value:    10,
+			Usage:    "Scrape the web content with increasing depth by crawling each URL based on the last one, and incrementing the current depth by 1 relative to the previous depth. Stop crawling once the maximum depth is reached.",
+			Category: ConfigArgsGroup,
 		},
 	}
 	app.Action = RunMain

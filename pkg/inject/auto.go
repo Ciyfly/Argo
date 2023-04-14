@@ -24,7 +24,7 @@ function run(){
     var email = "%s"
     var phone = "%s";
     var slow = %f;
-    var filter = [%s];
+    var filter = ["%s"];
 
     // 判断是否是过滤的 不包含过滤字符串才进行点击
     function filterClick(node){
@@ -161,7 +161,7 @@ func Auto(page *rod.Page) []string {
 		conf.GlobalConfig.LoginConf.Email,
 		conf.GlobalConfig.LoginConf.Phone,
 		conf.GlobalConfig.AutoConf.Slow,
-		strings.Join(conf.GlobalConfig.AutoConf.Filter, ","))
+		strings.Join(conf.GlobalConfig.AutoConf.Filter, "\", \""))
 	info, err := utils.GetPageInfoByPage(page)
 	if err != nil {
 		return nil

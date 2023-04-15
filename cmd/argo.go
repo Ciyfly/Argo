@@ -5,15 +5,19 @@ import (
 	"argo/pkg/engine"
 	"argo/pkg/log"
 	"argo/pkg/req"
+	"argo/pkg/updateself"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 
+	_ "net/http/pprof"
+
 	cli "github.com/urfave/cli/v2"
 )
 
-var Version = "1.0"
+var Version = "v1.0"
 
 func SetupCloseHandler() {
 	c := make(chan os.Signal)
@@ -25,7 +29,20 @@ func SetupCloseHandler() {
 	}()
 }
 
+const (
+	UseArgsGroup     string = "Use"
+	BrowserArgsGroup        = "Browser"
+	DataArgsGroup           = "Data"
+	ConfigArgsGroup         = "Config"
+	OutPutArgsGroup         = "OutPut"
+	DebugArgsGroup          = "Debug"
+	UpdateArgsGroup         = "Update"
+)
+
 func main() {
+	go func() {
+		http.ListenAndServe("0.0.0.0:6060", nil)
+	}()
 	SetupCloseHandler()
 	app := cli.NewApp()
 	app.Name = "argo"
@@ -35,102 +52,139 @@ func main() {
 
 	app.Flags = []cli.Flag{
 		&cli.StringFlag{
-			Name:    "target",
-			Aliases: []string{"t"},
-			Value:   "",
-			Usage:   "Specify the entry point for testing",
+			Name:     "target",
+			Aliases:  []string{"t"},
+			Value:    "",
+			Usage:    "Specify the entry point for testing",
+			Category: UseArgsGroup,
 		},
 		&cli.StringFlag{
-			Name:    "targetsfile",
-			Aliases: []string{"f"},
-			Value:   "",
-			Usage:   "The specified target file list has each target separated by a new line, just like other tools we have used in the past",
+			Name:     "targetsfile",
+			Aliases:  []string{"f"},
+			Value:    "",
+			Usage:    "The specified target file list has each target separated by a new line, just like other tools we have used in the past",
+			Category: UseArgsGroup,
 		},
 		&cli.BoolFlag{
-			Name:    "unheadless",
-			Aliases: []string{"uh"},
-			Value:   false,
-			Usage:   "Is the default interface disabled? Specify 'uh' to enable the interface",
+			Name:     "unheadless",
+			Aliases:  []string{"uh"},
+			Value:    false,
+			Usage:    "Is the default interface disabled? Specify 'uh' to enable the interface",
+			Category: DebugArgsGroup,
 		},
 		&cli.BoolFlag{
-			Name:  "trace",
-			Value: false,
-			Usage: "Whether to display the elements of operation after opening the interface",
+			Name:     "trace",
+			Value:    false,
+			Usage:    "Whether to display the elements of operation after opening the interface",
+			Category: BrowserArgsGroup,
 		},
 		&cli.Float64Flag{
-			Name:  "slow",
-			Value: 1000,
-			Usage: "The default delay time for operating after enabling ",
+			Name:     "slow",
+			Value:    1000,
+			Usage:    "The default delay time for operating after enabling ",
+			Category: BrowserArgsGroup,
 		},
 		&cli.StringFlag{
-			Name:    "username",
-			Aliases: []string{"u"},
-			Value:   "argo",
-			Usage:   "If logging in, the default username ",
+			Name:     "username",
+			Aliases:  []string{"u"},
+			Value:    "argo",
+			Usage:    "If logging in, the default username ",
+			Category: DataArgsGroup,
 		},
 		&cli.StringFlag{
-			Name:    "password",
-			Aliases: []string{"p"},
-			Value:   "argo123",
-			Usage:   "If logging in, the default password",
+			Name:     "password",
+			Aliases:  []string{"p"},
+			Value:    "argo123",
+			Usage:    "If logging in, the default password",
+			Category: DataArgsGroup,
 		},
 		&cli.StringFlag{
-			Name:  "email",
-			Value: "argo@recar.com",
-			Usage: "If logging in, the default email",
+			Name:     "email",
+			Value:    "argo@recar.com",
+			Usage:    "If logging in, the default email",
+			Category: DataArgsGroup,
 		},
 		&cli.StringFlag{
-			Name:  "phone",
-			Value: "18888888888",
-			Usage: "If logging in, the default phone",
+			Name:     "phone",
+			Value:    "18888888888",
+			Usage:    "If logging in, the default phone",
+			Category: DataArgsGroup,
 		},
 		&cli.StringFlag{
-			Name:  "playback",
-			Usage: "Support replay like headless YAML scripts",
+			Name:     "playback",
+			Usage:    "Support replay like headless YAML scripts",
+			Category: UseArgsGroup,
 		},
 		&cli.BoolFlag{
-			Name:  "testplayback",
-			Usage: "If opened, then directly end after executing the specified playback script",
+			Name:     "testplayback",
+			Usage:    "If opened, then directly end after executing the specified playback script",
+			Category: DebugArgsGroup,
 		},
 		&cli.StringFlag{
-			Name:  "proxy",
-			Value: "",
-			Usage: "Set up a proxy, for example, http://127.0.0.1:3128",
+			Name:     "proxy",
+			Value:    "",
+			Usage:    "Set up a proxy, for example, http://127.0.0.1:3128",
+			Category: UseArgsGroup,
 		},
 		&cli.IntFlag{
-			Name:    "tabcount",
-			Aliases: []string{"c"},
-			Value:   10,
-			Usage:   "The maximum number of tab pages that can be opened",
+			Name:     "tabcount",
+			Aliases:  []string{"c"},
+			Value:    10,
+			Usage:    "The maximum number of tab pages that can be opened",
+			Category: ConfigArgsGroup,
 		},
 		&cli.IntFlag{
-			Name:  "tabtimeout",
-			Value: 30,
-			Usage: "Set the maximum running time for the tab, and close the tab if it exceeds the limit. The unit is in seconds",
+			Name:     "tabtimeout",
+			Value:    30,
+			Usage:    "Set the maximum running time for the tab, and close the tab if it exceeds the limit. The unit is in seconds",
+			Category: ConfigArgsGroup,
 		},
 		&cli.IntFlag{
-			Name:  "browsertimeout",
-			Value: 18000,
-			Usage: "Set the maximum running time for the browser, and close the browser if it exceeds the limit. The unit is in seconds",
+			Name:     "browsertimeout",
+			Value:    18000,
+			Usage:    "Set the maximum running time for the browser, and close the browser if it exceeds the limit. The unit is in seconds",
+			Category: ConfigArgsGroup,
 		},
 		&cli.StringFlag{
-			Name:  "save",
-			Usage: "The default name for the saved result is 'target' without a file extension. For example, to save as 'test', use the command '--save test'",
+			Name:     "save",
+			Usage:    "The default name for the saved result is 'target' without a file extension. For example, to save as 'test', use the command '--save test'",
+			Category: OutPutArgsGroup,
 		},
 		&cli.StringFlag{
-			Name:  "format",
-			Value: "txt,json",
-			Usage: "Result output format separated by commas, multiple formats can be output at one time, and the supported formats include txt, json, xlsx, and html",
+			Name:     "format",
+			Value:    "txt,json",
+			Usage:    "Result output format separated by commas, multiple formats can be output at one time, and the supported formats include txt, json, xlsx, and html",
+			Category: OutPutArgsGroup,
 		},
 		&cli.BoolFlag{
-			Name:  "debug",
-			Value: false,
-			Usage: "Do you want to output debug information?",
+			Name:     "debug",
+			Value:    false,
+			Usage:    "Do you want to output debug information?",
+			Category: DebugArgsGroup,
 		},
 		&cli.BoolFlag{
-			Name:  "dev",
-			Value: false,
-			Usage: "Enable dev mode. This will activate the browser interface mode and stop after accessing the page for development and debugging purposes",
+			Name:     "dev",
+			Value:    false,
+			Usage:    "Enable dev mode. This will activate the browser interface mode and stop after accessing the page for development and debugging purposes",
+			Category: DebugArgsGroup,
+		},
+		&cli.BoolFlag{
+			Name:     "norrs",
+			Value:    true,
+			Usage:    "There is no storage request response string, which can save memory and is suitable for a large number of scans",
+			Category: UseArgsGroup,
+		},
+		&cli.IntFlag{
+			Name:     "maxdepth",
+			Value:    10,
+			Usage:    "Scrape the web content with increasing depth by crawling each URL based on the last one, and incrementing the current depth by 1 relative to the previous depth. Stop crawling once the maximum depth is reached.",
+			Category: ConfigArgsGroup,
+		},
+		&cli.BoolFlag{
+			Name:     "update",
+			Value:    false,
+			Usage:    "update self",
+			Category: UpdateArgsGroup,
 		},
 	}
 	app.Action = RunMain
@@ -143,6 +197,11 @@ func main() {
 }
 
 func RunMain(c *cli.Context) error {
+	update := c.Bool("update")
+	if update {
+		updateself.CheckIfUpgradeRequired(Version)
+		return nil
+	}
 	target := c.String("target")
 	targetsFile := c.String("targetsfile")
 	if target == "" && targetsFile == "" {

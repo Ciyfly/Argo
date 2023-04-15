@@ -99,7 +99,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, flag int) {
 				PushUrlWg.Add(1)
 				go func(staticUrl string) {
 					defer PushUrlWg.Done()
-					PushStaticUrl(&UrlInfo{Url: staticUrl, SourceType: "static parse", SourceUrl: uif.Url})
+					PushStaticUrl(&UrlInfo{Url: staticUrl, SourceType: "static parse", SourceUrl: uif.Url, Depth: uif.Depth + 1})
 				}(staticUrl)
 			}
 		}
@@ -118,7 +118,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, flag int) {
 			PushUrlWg.Add(1)
 			go func(staticUrl string) {
 				defer PushUrlWg.Done()
-				PushStaticUrl(&UrlInfo{Url: staticUrl, SourceType: "auto js", SourceUrl: uif.Url})
+				PushStaticUrl(&UrlInfo{Url: staticUrl, SourceType: "auto js", SourceUrl: uif.Url, Depth: uif.Depth + 1})
 			}(staticUrl)
 		}
 		// 推送下如果 单纯的去修改当前页面url的形式
@@ -127,7 +127,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, flag int) {
 			PushUrlWg.Add(1)
 			go func(currentUrl string) {
 				defer PushUrlWg.Done()
-				PushStaticUrl(&UrlInfo{Url: info.URL, SourceType: "patch", SourceUrl: uif.Url})
+				PushStaticUrl(&UrlInfo{Url: info.URL, SourceType: "patch", SourceUrl: uif.Url, Depth: uif.Depth + 1})
 			}(currentUrl)
 		}
 		// 所有url提交完成才能结束
@@ -169,6 +169,10 @@ func PushTabQueue(uif *UrlInfo) {
 func (ei *EngineInfo) TabWork() {
 	for {
 		uif := <-tabQueue
+		if uif.Depth > conf.GlobalConfig.BrowserConf.MaxDepth {
+			log.Logger.Debugf("[ Max Depth] => %s depth: %d", uif.Url, uif.Depth)
+			continue
+		}
 		TabWg.Add(1)
 		go ei.NewTab(uif, 1)
 	}

@@ -17,7 +17,7 @@ import (
 	cli "github.com/urfave/cli/v2"
 )
 
-var Version = "1.0"
+var Version = "v1.0"
 
 func SetupCloseHandler() {
 	c := make(chan os.Signal)

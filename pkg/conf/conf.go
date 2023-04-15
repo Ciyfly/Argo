@@ -105,7 +105,7 @@ func InitConfig() {
 	}
 	defer dstFile.Close()
 	dstFile.WriteString(defaultYamlConfigStr)
-	fmt.Print("argo create default config.yml")
+	fmt.Println("argo create default config.yml")
 }
 
 func LoadConfig() {

@@ -170,7 +170,7 @@ func main() {
 		},
 		&cli.BoolFlag{
 			Name:     "norrs",
-			Value:    true,
+			Value:    false,
 			Usage:    "There is no storage request response string, which can save memory and is suitable for a large number of scans",
 			Category: UseArgsGroup,
 		},

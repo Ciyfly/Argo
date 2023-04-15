@@ -23,6 +23,7 @@ No need to manually download chrome, run the program directly and it will automa
 
 ```yaml
 ./argo -h
+                        
 NAME:
    argo -  -t http://testphp.vulnweb.com/
 
@@ -30,7 +31,7 @@ USAGE:
    argo [global options] command [command options] [arguments...]
 
 VERSION:
-   1.0
+   v1.0
 
 AUTHOR:
    Recar <https://github.com/Ciyfly>
@@ -39,27 +40,53 @@ COMMANDS:
    help, h  Shows a list of commands or help for one command
 
 GLOBAL OPTIONS:
+   --help, -h     show help
+   --version, -v  print the version
+
+   Browser
+
+   --slow value  The default delay time for operating after enabling  (default: 1000)
+   --trace       Whether to display the elements of operation after opening the interface (default: false)
+
+   Config
+
+   --browsertimeout value      Set the maximum running time for the browser, and close the browser if it exceeds the limit. The unit is in seconds (default: 18000)
+   --maxdepth value            Scrape the web content with increasing depth by crawling each URL based on the last one, and incrementing the current depth by 1 relative to the previous depth. Stop crawling once the maximum depth is reached. (default: 10)
+   --tabcount value, -c value  The maximum number of tab pages that can be opened (default: 10)
+   --tabtimeout value          Set the maximum running time for the tab, and close the tab if it exceeds the limit. The unit is in seconds (default: 30)
+
+   Data
+
+   --email value               If logging in, the default email (default: "argo@recar.com")
+   --password value, -p value  If logging in, the default password (default: "argo123")
+   --phone value               If logging in, the default phone (default: "18888888888")
+   --username value, -u value  If logging in, the default username  (default: "argo")
+
+   Debug
+
+   --debug             Do you want to output debug information? (default: false)
+   --dev               Enable dev mode. This will activate the browser interface mode and stop after accessing the page for development and debugging purposes (default: false)
+   --testplayback      If opened, then directly end after executing the specified playback script (default: false)
+   --unheadless, --uh  Is the default interface disabled? Specify 'uh' to enable the interface (default: false)
+
+   OutPut
+
+   --format value  Result output format separated by commas, multiple formats can be output at one time, and the supported formats include txt, json, xlsx, and html (default: "txt,json")
+   --save value    The default name for the saved result is 'target' without a file extension. For example, to save as 'test', use the command '--save test'
+
+   Update
+
+   --update  update self (default: false)
+
+   Use
+
+   --norrs                        There is no storage request response string, which can save memory and is suitable for a large number of scans (default: true)
+   --playback value               Support replay like headless YAML scripts
+   --proxy value                  Set up a proxy, for example, http://127.0.0.1:3128
    --target value, -t value       Specify the entry point for testing
    --targetsfile value, -f value  The specified target file list has each target separated by a new line, just like other tools we have used in the past
-   --unheadless, --uh             Is the default interface disabled? Specify 'uh' to enable the interface (default: false)
-   --trace                        Whether to display the elements of operation after opening the interface (default: false)
-   --slow value                   The default delay time for operating after enabling  (default: 1000)
-   --username value, -u value     If logging in, the default username  (default: "argo")
-   --password value, -p value     If logging in, the default password (default: "argo123")
-   --email value                  If logging in, the default email (default: "argo@recar.com")
-   --phone value                  If logging in, the default phone (default: "18888888888")
-   --playback value               Support replay like headless YAML scripts
-   --testplayback                 If opened, then directly end after executing the specified playback script (default: false)
-   --proxy value                  Set up a proxy, for example, http://127.0.0.1:3128
-   --tabcount value, -c value     The maximum number of tab pages that can be opened (default: 10)
-   --tabtimeout value             Set the maximum running time for the tab, and close the tab if it exceeds the limit. The unit is in seconds (default: 30)
-   --browsertimeout value         Set the maximum running time for the browser, and close the browser if it exceeds the limit. The unit is in seconds (default: 18000)
-   --save value                   The default name for the saved result is 'target' without a file extension. For example, to save as 'test', use the command '--save test'
-   --format value                 Result output format separated by commas, multiple formats can be output at one time, and the supported formats include txt, json, xlsx, and html (default: "txt,json")
-   --debug                        Do you want to output debug information? (default: false)
-   --dev                          Enable dev mode. This will activate the browser interface mode and stop after accessing the page for development and debugging purposes (default: false)
-   --help, -h                     show help
-   --version, -v                  print the version
+
+
 ```
 
 ## run

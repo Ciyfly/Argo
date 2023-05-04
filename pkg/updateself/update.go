@@ -25,6 +25,7 @@ import (
 type LastVersionInfo struct {
 	TagName string   `json:"tag_name"`
 	Assets  []Assets `json:"assets"`
+	Body    string   `json:"body"`
 }
 type Assets struct {
 	Name               string `json:"name"`
@@ -58,44 +59,6 @@ func getLastVersion() (LastVersionInfo, error) {
 	}
 	return lvi, nil
 }
-
-// func downloadLastVersion(lastVersion, url string) error {
-// 	resp, err := http.Get(url)
-// 	if err != nil {
-// 		fmt.Printf("download last version: %s err: %s\n", lastVersion, err)
-// 	}
-// 	defer resp.Body.Close()
-// 	file, err := os.Create("new_Argo.tar")
-// 	if err != nil {
-// 		fmt.Printf("download last version: %s err: %s\n", lastVersion, err)
-// 		return err
-// 	}
-// 	defer file.Close()
-// 	size, _ := strconv.Atoi(resp.Header.Get("Content-Length"))
-// 	buf := make([]byte, 10240)
-// 	var downloaded int
-// 	for {
-// 		n, err := resp.Body.Read(buf)
-// 		if err != nil && err != io.EOF {
-// 			fmt.Printf("download last version: %s err: %s\n", lastVersion, err)
-// 			return err
-// 		}
-// 		if n > 0 {
-// 			_, err = file.Write(buf[:n])
-// 			if err != nil {
-// 				fmt.Printf("download last version: %s err: %s\n", lastVersion, err)
-// 				return err
-// 			}
-// 			downloaded += n
-// 			fmt.Printf("\rDownloading... %d%%", downloaded*100/size)
-// 		}
-// 		if downloaded == size {
-// 			break
-// 		}
-// 	}
-// 	fmt.Println("\nDownload complete.")
-// 	return nil
-// }
 
 func downloadLastVersion(lastVersion, url string) error {
 	resp, err := http.Get(url)
@@ -205,11 +168,16 @@ func decompress() {
 
 func CheckIfUpgradeRequired(version string) {
 	lvi, err := getLastVersion()
+
 	if err != nil {
 		return
 	}
 	if version < lvi.TagName {
 		fmt.Printf("need update current: %s last: %s\n", version, lvi.TagName)
+		fmt.Println("last version info")
+		fmt.Println("------------------------------")
+		fmt.Print(lvi.Body)
+		fmt.Println("\n------------------------------")
 		var downloadUrl string
 		for _, assest := range lvi.Assets {
 			if strings.Contains(assest.Name, runtime.GOOS) {

@@ -1,9 +1,11 @@
 package engine
 
 import (
+	"argo/pkg/log"
 	"argo/pkg/utils"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -74,7 +76,20 @@ func isNumber(s string) bool {
 	return err == nil
 }
 
+func normalizeationPath(pathStr string) string {
+	normalizedUrl := pathStr
+	var numRe = regexp.MustCompile(`\d+`)
+	normalizedUrl = numRe.ReplaceAllStringFunc(normalizedUrl, func(s string) string {
+		return "number"
+	})
+	if len(normalizedUrl) > 0 && normalizedUrl[len(normalizedUrl)-1] != '/' {
+		normalizedUrl += "/"
+	}
+	return normalizedUrl
+}
+
 func normalizeation(target, method string) string {
+	// 参数泛化
 	// 泛化方法 这里先已url泛化来去重
 	// 对 URL 中的查询参数进行排序，并将数字替换为 "@"
 	u, _ := url.Parse(target)
@@ -95,9 +110,13 @@ func normalizeation(target, method string) string {
 			}
 		}
 	}
+	// path 泛化
 	normalizeStr := strings.ToLower(u.Host)
 	if u.Path != "" {
-		normalizeStr += u.Path
+		norPath := normalizeationPath(u.Path)
+		normalizeStr += norPath
+		// normalizeStr += u.Path
+
 	}
 	if paramsStr != "" {
 		normalizeStr += paramsStr
@@ -109,7 +128,7 @@ func normalizeation(target, method string) string {
 	} else {
 		normalizeStr = method + "|" + normalizeStr
 	}
-	// log.Logger.Debugf("normalizeStr url %s -> %s", u, normalizeStr)
+	log.Logger.Debugf("normalizeStr url %s -> %s", u, normalizeStr)
 
 	return utils.GetMD5(normalizeStr)
 }

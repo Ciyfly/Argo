@@ -59,7 +59,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, flag int) {
 		}
 		// 调试模式 手动去操作 停止所有
 		if conf.GlobalConfig.Dev {
-			ei.closeTab(page, flag, done)
+			// ei.closeTab(page, flag, done)
 			return
 		}
 		if err != nil {
@@ -93,7 +93,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, flag int) {
 		inject.InjectScript(page, 1)
 		// 静态解析下dom 爬取一些url
 		staticUrlList := static.ParseDom(page)
-		// log.Logger.Debugf("parse %s -> staticUrlList: %s", uif.Url, staticUrlList)
+		log.Logger.Debugf("static %s parse count: %d", uif.Url, len(staticUrlList))
 		if staticUrlList != nil {
 			for _, staticUrl := range staticUrlList {
 				PushUrlWg.Add(1)
@@ -113,6 +113,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, flag int) {
 		} else {
 			currentUrl = info.URL
 		}
+		log.Logger.Debugf("dynamic %s parse count: %d", uif.Url, len(staticUrlList))
 		// 解析demo
 		for _, staticUrl := range hrefList {
 			PushUrlWg.Add(1)
@@ -182,7 +183,7 @@ func (ei *EngineInfo) StaticUrlWork() {
 	for {
 		uif := <-urlsQueue
 		// pass 掉host之外的域名
-		if strings.Contains(uif.Url, "http") && !strings.Contains(uif.Url, ei.Host) {
+		if strings.Contains(uif.Url, "http") && !strings.Contains("//"+uif.Url, ei.Host) {
 			continue
 		}
 		if filterStatic(uif.Url) {

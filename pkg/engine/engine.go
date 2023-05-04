@@ -179,6 +179,7 @@ func (ei *EngineInfo) Start() {
 				pushpendingNormalizeQueue(pu)
 			}
 		}
+		ctx.ContinueRequest(&proto.FetchContinueRequest{})
 
 	})
 	go router.Run()

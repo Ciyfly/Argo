@@ -92,6 +92,9 @@ func absUrl(urlStr string) string {
 
 func HandlerUrl(urlStr, currentUrl string) string {
 	if !strings.Contains(urlStr, "http") {
+		if len(urlStr) == 0 {
+			return ""
+		}
 		if urlStr[:1] == "/" {
 			// 如果 href开头是/ 那么就是以host的路由拼接 否则是以当前路由做拼接
 			parsedURL, _ := url.Parse(currentUrl)

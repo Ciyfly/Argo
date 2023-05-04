@@ -182,6 +182,9 @@ func (ei *EngineInfo) TabWork() {
 func (ei *EngineInfo) StaticUrlWork() {
 	for {
 		uif := <-urlsQueue
+		if uif.Url == "" {
+			continue
+		}
 		// pass 掉host之外的域名
 		if strings.Contains(uif.Url, "http") && !strings.Contains("//"+uif.Url, ei.Host) {
 			continue

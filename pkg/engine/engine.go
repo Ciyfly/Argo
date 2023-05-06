@@ -176,7 +176,9 @@ func (ei *EngineInfo) Start() {
 					pu.ResponseBody = utils.EncodeBase64(ctx.Response.Payload().Body)
 					pu.RequestStr = utils.EncodeBase64(reqBytes)
 				}
-				pushpendingNormalizeQueue(pu)
+				if strings.HasPrefix(pu.URL, "http://"+ei.Host) || strings.HasPrefix(pu.URL, "https://"+ei.Host) {
+					pushpendingNormalizeQueue(pu)
+				}
 			}
 		}
 		ctx.ContinueRequest(&proto.FetchContinueRequest{})

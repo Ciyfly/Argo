@@ -186,7 +186,7 @@ func (ei *EngineInfo) StaticUrlWork() {
 			continue
 		}
 		// pass 掉host之外的域名
-		if strings.Contains(uif.Url, "http") && !strings.Contains("//"+uif.Url, ei.Host) {
+		if strings.Contains(uif.Url, "http") && !strings.Contains(uif.Url, "http://"+ei.Host) || !strings.Contains(uif.Url, "https://"+ei.Host) {
 			continue
 		}
 		if filterStatic(uif.Url) {

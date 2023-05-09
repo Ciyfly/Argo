@@ -214,6 +214,16 @@ https://chat.openai.com/
 
 argo的编译后的程序是 github action 自动编译的 当然可以自己编译  
 
+如果第一次运行报错 error while loading shared libraries: libatk-1.0.so.0: cannot open shared object file: No such file or directory  
+解决如下
+```shell
+# centos
+yum install pango.x86_64 libXcomposite.x86_64 libXcursor.x86_64 libXdamage.x86_64 libXext.x86_64 libXi.x86_64 libXtst.x86_64 cups-libs.x86_64 libXScrnSaver.x86_64 libXrandr.x86_64 GConf2.x86_64 alsa-lib.x86_64 atk.x86_64 gtk3.x86_64 -y
+
+# ubuntu
+apt-get install -yq --no-install-recommends libasound2 libatk1.0-0 libc6 libcairo2 libcups2 libdbus-1-3 libexpat1 libfontconfig1 libgcc1 libgconf-2-4 libgdk-pixbuf2.0-0 libglib2.0-0 libgtk-3-0 libnspr4 libpango-1.0-0 libpangocairo-1.0-0 libstdc++6 libx11-6 libx11-xcb1 libxcb1 libxcursor1 libxdamage1 libxext6 libxfixes3 libxi6 libxrandr2 libxrender1 libxss1 libxtst6 libnss3
+```
+
 ## 交流
 可以加群交流Argo方面的问题  
 

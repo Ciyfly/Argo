@@ -229,7 +229,7 @@ apt-get install -yq --no-install-recommends libasound2 libatk1.0-0 libc6 libcair
 ## 交流
 可以加群交流Argo方面的问题  
 
-![](imgs/Argo交流群.png)
+![](imgs/Argo交流群.jpg)
 
 
 

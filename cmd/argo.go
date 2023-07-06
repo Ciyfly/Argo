@@ -151,6 +151,11 @@ func main() {
 			Category: OutPutArgsGroup,
 		},
 		&cli.StringFlag{
+			Name:     "outputdir",
+			Usage:    "save output to directory",
+			Category: OutPutArgsGroup,
+		},
+		&cli.StringFlag{
 			Name:     "format",
 			Value:    "txt,json",
 			Usage:    "Output format separated by commas, txt, json, xlsx, html supported.",

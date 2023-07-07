@@ -9,7 +9,7 @@ import (
 
 var Logger *logrus.Logger
 
-func Init(debug bool) {
+func Init(debug bool, quiet bool) {
 	Logger = logrus.New()
 	Logger.SetOutput(os.Stderr)
 	// Logger.SetReportCaller(true)         //开启返回函数名和行号
@@ -17,5 +17,8 @@ func Init(debug bool) {
 	Logger.SetLevel(logrus.InfoLevel)
 	if debug {
 		Logger.SetLevel(logrus.DebugLevel)
+	}
+	if quiet {
+		Logger.SetLevel(logrus.PanicLevel)
 	}
 }

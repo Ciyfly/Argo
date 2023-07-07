@@ -47,6 +47,7 @@ type Conf struct {
 	TargetList       []string
 	Dev              bool
 	NoReqRspStr      bool
+	Quiet            bool
 }
 
 // 保存的格式
@@ -145,6 +146,8 @@ func MergeArgs(c *cli.Context) {
 	format := c.String("format")
 	outputDir := c.String("outputdir")
 
+	//静默输出
+	quiet := c.Bool("quiet")
 	// debug dev
 	devMode := c.Bool("dev")
 
@@ -221,6 +224,9 @@ func MergeArgs(c *cli.Context) {
 
 	//dev
 	GlobalConfig.Dev = devMode
+
+	// 静默
+	GlobalConfig.Quiet = quiet
 
 	// 优化控制
 	GlobalConfig.NoReqRspStr = norrs

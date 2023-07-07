@@ -50,6 +50,10 @@ func resultHandlerWork() {
 	for data := range ResultQueue {
 		ResultList = append(ResultList, data)
 		log.Logger.Infof("[%s] %s", data.Method, data.URL)
+		if conf.GlobalConfig.Quiet {
+			jsonData, _ := json.Marshal(data)
+			fmt.Println(string(jsonData))
+		}
 	}
 }
 

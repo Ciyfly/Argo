@@ -146,6 +146,12 @@ func main() {
 			Category: ConfigArgsGroup,
 		},
 		&cli.StringFlag{
+			Name:     "chrome",
+			Value:    "",
+			Usage:    "Specify the Chrome executable path, e.g. --chrome /opt/google/chrome/chrome",
+			Category: ConfigArgsGroup,
+		},
+		&cli.StringFlag{
 			Name:     "save",
 			Usage:    "Result saved as 'target' by default. Use '--save test' to save as 'test'.",
 			Category: OutPutArgsGroup,

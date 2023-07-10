@@ -74,6 +74,7 @@ type BrowserConf struct {
 	TabTimeout     int    `yaml:"tab_timeout"`
 	BrowserTimeout int    `yaml:"browser_timeout"`
 	MaxDepth       int    `yaml:"max_depth"`
+	Chrome         string `yaml:"chrome"`
 }
 
 // auto 自动触发的一些参数
@@ -138,6 +139,7 @@ func MergeArgs(c *cli.Context) {
 	tabCount := c.Int("tabcount")
 	tabTimeout := c.Int("tabtimeout")
 	browserTimeout := c.Int("browsertimeout")
+	chrome := c.String("chrome")
 	// 回放
 	playback := c.String("playback")
 	testPlayback := c.Bool("testplayback")
@@ -202,6 +204,9 @@ func MergeArgs(c *cli.Context) {
 	}
 	if browserTimeout != GlobalConfig.BrowserConf.BrowserTimeout {
 		GlobalConfig.BrowserConf.BrowserTimeout = browserTimeout
+	}
+	if chrome != GlobalConfig.BrowserConf.Chrome {
+		GlobalConfig.BrowserConf.Chrome = chrome
 	}
 	// 登录参数
 	if username != GlobalConfig.LoginConf.Username {

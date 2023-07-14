@@ -140,7 +140,7 @@ func main() {
 		},
 		&cli.IntFlag{
 			Name:     "browsertimeout",
-			Value:    10800,
+			Value:    3600,
 			Usage:    "Set max browser run time, close if limit exceeded. Unit is seconds.",
 			Category: ConfigArgsGroup,
 		},

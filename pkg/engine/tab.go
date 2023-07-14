@@ -56,6 +56,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, flag int) {
 
 	// tab关闭通道
 	tabDone := make(chan bool, 1)
+	var page *rod.Page
 	if TabLimitCloseFlag {
 		return
 	}
@@ -63,7 +64,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, flag int) {
 	ei.TabCount += 1
 	go func() {
 		// 创建tab
-		page, err := ei.Browser.Page(proto.TargetCreateTarget{URL: uif.Url})
+		page, _ = ei.Browser.Page(proto.TargetCreateTarget{URL: uif.Url})
 		// log.Logger.Debug(page.HTML())
 		info, err := utils.GetPageInfoByPage(page)
 		if err != nil {
@@ -157,7 +158,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, flag int) {
 		log.Logger.Debugf("[close tab ] => %s", uif.Url)
 	case <-time.After(time.Duration(conf.GlobalConfig.BrowserConf.TabTimeout) * time.Second):
 		log.Logger.Warnf("[timeout tab ] => %s", uif.Url)
-		ei.closeTab(nil, flag, tabDone)
+		ei.closeTab(page, flag, tabDone)
 	}
 }
 

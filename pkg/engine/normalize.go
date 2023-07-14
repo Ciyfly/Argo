@@ -41,6 +41,10 @@ func InitNormalize() {
 }
 
 func pushpendingNormalizeQueue(pu *PendingUrl) {
+	// 管道关闭了就不发送数据了
+	if NormalizeCloseChanFlag {
+		return
+	}
 	PendingNormalizeQueue <- pu
 }
 

@@ -7,7 +7,6 @@ import (
 	"argo/pkg/req"
 	"argo/pkg/updateself"
 	"fmt"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -40,9 +39,9 @@ const (
 )
 
 func main() {
-	go func() {
-		http.ListenAndServe("0.0.0.0:6060", nil)
-	}()
+	// go func() {
+	// 	http.ListenAndServe("0.0.0.0:6060", nil)
+	// }()
 	SetupCloseHandler()
 	app := cli.NewApp()
 	app.Name = "argo"
@@ -141,7 +140,7 @@ func main() {
 		},
 		&cli.IntFlag{
 			Name:     "browsertimeout",
-			Value:    18000,
+			Value:    10800,
 			Usage:    "Set max browser run time, close if limit exceeded. Unit is seconds.",
 			Category: ConfigArgsGroup,
 		},

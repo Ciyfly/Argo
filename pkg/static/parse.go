@@ -117,6 +117,9 @@ func HandlerUrls(urls []string, currentUrl string) []string {
 	newUrls := []string{}
 	for _, urlStr := range urls {
 		if !strings.Contains(urlStr, "http") {
+			if len(urlStr) == 0 {
+				continue
+			}
 			// xxx.php
 			if urlStr[:1] == "/" {
 				// /index.php -> host/index.php

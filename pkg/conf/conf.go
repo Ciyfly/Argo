@@ -47,12 +47,14 @@ type Conf struct {
 	TargetList       []string
 	Dev              bool
 	NoReqRspStr      bool
+	Quiet            bool
 }
 
 // 保存的格式
 type ResultConf struct {
-	Format string
-	Name   string
+	OutputDir string
+	Format    string
+	Name      string
 }
 
 // 默认的用户名密码
@@ -72,6 +74,7 @@ type BrowserConf struct {
 	TabTimeout     int    `yaml:"tab_timeout"`
 	BrowserTimeout int    `yaml:"browser_timeout"`
 	MaxDepth       int    `yaml:"max_depth"`
+	Chrome         string `yaml:"chrome"`
 }
 
 // auto 自动触发的一些参数
@@ -136,13 +139,17 @@ func MergeArgs(c *cli.Context) {
 	tabCount := c.Int("tabcount")
 	tabTimeout := c.Int("tabtimeout")
 	browserTimeout := c.Int("browsertimeout")
+	chrome := c.String("chrome")
 	// 回放
 	playback := c.String("playback")
 	testPlayback := c.Bool("testplayback")
 	// 处理结果参数
 	save := c.String("save")
 	format := c.String("format")
+	outputDir := c.String("outputdir")
 
+	//静默输出
+	quiet := c.Bool("quiet")
 	// debug dev
 	devMode := c.Bool("dev")
 
@@ -198,6 +205,9 @@ func MergeArgs(c *cli.Context) {
 	if browserTimeout != GlobalConfig.BrowserConf.BrowserTimeout {
 		GlobalConfig.BrowserConf.BrowserTimeout = browserTimeout
 	}
+	if chrome != GlobalConfig.BrowserConf.Chrome {
+		GlobalConfig.BrowserConf.Chrome = chrome
+	}
 	// 登录参数
 	if username != GlobalConfig.LoginConf.Username {
 		GlobalConfig.LoginConf.Username = username
@@ -215,9 +225,13 @@ func MergeArgs(c *cli.Context) {
 	// 结果处理参数
 	GlobalConfig.ResultConf.Name = save
 	GlobalConfig.ResultConf.Format = format
+	GlobalConfig.ResultConf.OutputDir = outputDir
 
 	//dev
 	GlobalConfig.Dev = devMode
+
+	// 静默
+	GlobalConfig.Quiet = quiet
 
 	// 优化控制
 	GlobalConfig.NoReqRspStr = norrs

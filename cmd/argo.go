@@ -7,7 +7,6 @@ import (
 	"argo/pkg/req"
 	"argo/pkg/updateself"
 	"fmt"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -40,9 +39,9 @@ const (
 )
 
 func main() {
-	go func() {
-		http.ListenAndServe("0.0.0.0:6060", nil)
-	}()
+	// go func() {
+	// 	http.ListenAndServe("0.0.0.0:6060", nil)
+	// }()
 	SetupCloseHandler()
 	app := cli.NewApp()
 	app.Name = "argo"
@@ -141,8 +140,14 @@ func main() {
 		},
 		&cli.IntFlag{
 			Name:     "browsertimeout",
-			Value:    18000,
+			Value:    3600,
 			Usage:    "Set max browser run time, close if limit exceeded. Unit is seconds.",
+			Category: ConfigArgsGroup,
+		},
+		&cli.StringFlag{
+			Name:     "chrome",
+			Value:    "",
+			Usage:    "Specify the Chrome executable path, e.g. --chrome /opt/google/chrome/chrome",
 			Category: ConfigArgsGroup,
 		},
 		&cli.StringFlag{
@@ -150,6 +155,17 @@ func main() {
 			Usage:    "Result saved as 'target' by default. Use '--save test' to save as 'test'.",
 			Category: OutPutArgsGroup,
 		},
+		&cli.StringFlag{
+			Name:     "outputdir",
+			Usage:    "save output to directory",
+			Category: OutPutArgsGroup,
+		},
+		&cli.BoolFlag{
+			Name:     "quiet",
+			Usage:    "Enable quiet mode to output only the URL information that has been retrieved, in JSON format",
+			Category: OutPutArgsGroup,
+		},
+
 		&cli.StringFlag{
 			Name:     "format",
 			Value:    "txt,json",
@@ -209,13 +225,15 @@ func RunMain(c *cli.Context) error {
 		os.Exit(1)
 	}
 	debug := c.Bool("debug")
-	log.Init(debug)
+	quiet := c.Bool("quiet")
+	log.Init(debug, quiet)
 	log.Logger.Info("[argo start]")
 	// 加载/初始化 config.yml
 	conf.LoadConfig()
 	// 合并 命令行与 yaml
 	conf.MergeArgs(c)
 	// 浏览器引擎初始化
+
 	for _, t := range conf.GlobalConfig.TargetList {
 		log.Logger.Infof("target: %s", t)
 		if !req.CheckTarget(t) {

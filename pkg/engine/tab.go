@@ -23,51 +23,80 @@ func (f *Faker) Write(p []byte) (n int, err error) {
 	return 0, nil
 }
 
+// tab 协程组
 var TabWg sync.WaitGroup
+
+// 控制tab的数量
 var TabLimit chan int
 
-func (ei *EngineInfo) closeTab(page *rod.Page, flag int, done chan bool) {
-	if flag == 0 {
-		ei.CloseChan <- flag
-	}
-	<-TabLimit
+// TabLimit 关闭flag
+var TabLimitCloseFlag bool
+
+func (ei *EngineInfo) closeTab(page *rod.Page, homePageFlag int, timeoutFlage int, tabDone chan bool) {
+
+	log.Logger.Debugf("TabLimit  1: %d", len(TabLimit))
+	pages, _ := ei.Browser.Pages()
+	pagesCount := len(pages)
+	log.Logger.Debugf("page count: %d", pagesCount)
 	if page != nil {
 		page.Close()
 	}
-	TabWg.Done()
+	log.Logger.Debugf("TabLimit  2: %d", len(TabLimit))
+	pages, _ = ei.Browser.Pages()
+	pagesCount = len(pages)
+	log.Logger.Debugf("page count: %d", pagesCount)
+	if timeoutFlage == NOT_PAGE_TIME_FLAG {
+		tabDone <- true
+	}
+	if homePageFlag == HOME_PAGE_FLAG {
+		ei.FirstPageCloseChan <- true
+		// first 手动done
+		TabWg.Done()
+	}
 }
 
-func (ei *EngineInfo) NewTab(uif *UrlInfo, flag int) {
-	TabLimit <- 1
+func (ei *EngineInfo) NormalCloseTab(page *rod.Page, homePageFlag int, tabDone chan bool) {
+	ei.closeTab(page, homePageFlag, NOT_PAGE_TIME_FLAG, tabDone)
+}
+func (ei *EngineInfo) TimeoutCloseTab(page *rod.Page, homePageFlag int, tabDone chan bool) {
+
+	ei.closeTab(page, homePageFlag, PAGE_TIMEOUT_FLAG, tabDone)
+}
+
+func (ei *EngineInfo) NewTab(uif *UrlInfo, homePageFlag int) {
+
+	// tab关闭通道
+	tabDone := make(chan bool, 1)
+	var page *rod.Page
+	var NormalDoneFlag = false
+	var TimeoutDoneFlag = false
+	if TabLimitCloseFlag {
+		return
+	}
 	var PushUrlWg sync.WaitGroup
-	done := make(chan bool)
 	ei.TabCount += 1
 	go func() {
 		// 创建tab
-		page, err := ei.Browser.Page(proto.TargetCreateTarget{URL: uif.Url})
+		page, _ = ei.Browser.Page(proto.TargetCreateTarget{URL: uif.Url})
 		// log.Logger.Debug(page.HTML())
 		info, err := utils.GetPageInfoByPage(page)
 		if err != nil {
 			// 超时干掉了page
-			ei.closeTab(page, flag, done)
+			ei.NormalCloseTab(page, homePageFlag, tabDone)
 			return
 		}
 		html, _ := page.HTML()
 		if strings.Contains(info.Title, "404") || static.Match404ResponsePage([]byte(html)) {
-			ei.closeTab(page, flag, done)
+			ei.NormalCloseTab(page, homePageFlag, tabDone)
 			return
 		}
 		// 调试模式 手动去操作 停止所有
 		if conf.GlobalConfig.Dev {
-			// ei.closeTab(page, flag, done)
+			// ei.NormalCloseTab(page, homePageFlag)
 			return
 		}
-		if err != nil {
-			log.Logger.Errorf("page %s error: %s  sourceType: %s sourceUrl: %s", uif.Url, err, uif.SourceType, uif.SourceUrl)
-			ei.closeTab(page, flag, done)
-			return
-		}
-		if flag == 0 {
+
+		if homePageFlag == HOME_PAGE_FLAG {
 			//  执行headless脚本 只有访问第一个页面的时候才会执行
 			if conf.GlobalConfig.PlaybackPath != "" {
 				log.Logger.Debugf("run playback script: %s", conf.GlobalConfig.PlaybackPath)
@@ -76,7 +105,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, flag int) {
 		}
 		if conf.GlobalConfig.TestPlayBack {
 			time.Sleep(time.Duration(conf.GlobalConfig.BrowserConf.TabTimeout) * time.Second)
-			ei.closeTab(page, flag, done)
+			ei.NormalCloseTab(page, homePageFlag, tabDone)
 			return
 		}
 		// 设置超时时间
@@ -133,16 +162,22 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, flag int) {
 		}
 		// 所有url提交完成才能结束
 		PushUrlWg.Wait()
-		ei.closeTab(page, flag, done)
+		NormalDoneFlag = true
+		if !TimeoutDoneFlag {
+			ei.NormalCloseTab(page, homePageFlag, tabDone)
+		}
 
 	}() // 协程
 	// 阻塞超时控制
 	select {
-	case <-done:
+	case <-tabDone:
 		log.Logger.Debugf("[close tab ] => %s", uif.Url)
 	case <-time.After(time.Duration(conf.GlobalConfig.BrowserConf.TabTimeout) * time.Second):
 		log.Logger.Warnf("[timeout tab ] => %s", uif.Url)
-		ei.closeTab(nil, flag, done)
+		if !NormalDoneFlag {
+			TimeoutDoneFlag = true
+			ei.TimeoutCloseTab(page, homePageFlag, tabDone)
+		}
 	}
 }
 
@@ -169,13 +204,32 @@ func PushTabQueue(uif *UrlInfo) {
 
 func (ei *EngineInfo) TabWork() {
 	for {
-		uif := <-tabQueue
-		if uif.Depth > conf.GlobalConfig.BrowserConf.MaxDepth {
-			log.Logger.Debugf("[ Max Depth] => %s depth: %d", uif.Url, uif.Depth)
+		select {
+		case TabLimit <- 1:
+			// 从队列中获取一个 URL 对象并创建新协程去处理它
+			uif := <-tabQueue
+			if uif.Depth > conf.GlobalConfig.BrowserConf.MaxDepth {
+				log.Logger.Debugf("[ Max Depth] => %s depth: %d", uif.Url, uif.Depth)
+				// 将当前并发数减 1
+				<-TabLimit
+				continue
+			}
+			TabWg.Add(1)
+			go func() {
+				defer func() {
+					// 当前tab done 继续推送url
+					<-TabLimit
+					TabWg.Done()
+
+				}()
+				log.Logger.Debugf("[ new tab  ]=> %s", uif.Url)
+				ei.NewTab(uif, NOT_HOME_PAGE_FLAG)
+			}()
+		default:
+			log.Logger.Debug("wait sleep 1s")
+			time.Sleep(1 * time.Second)
 			continue
 		}
-		TabWg.Add(1)
-		go ei.NewTab(uif, 1)
 	}
 }
 

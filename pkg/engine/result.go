@@ -48,8 +48,13 @@ func pushResult(pu *PendingUrl) {
 
 func resultHandlerWork() {
 	for data := range ResultQueue {
-		ResultList = append(ResultList, data)
-		log.Logger.Infof("[%s] %s", data.Method, data.URL)
+		if conf.GlobalConfig.Quiet {
+			jsonData, _ := json.Marshal(data)
+			fmt.Println(string(jsonData))
+		} else {
+			ResultList = append(ResultList, data)
+			log.Logger.Infof("[%s] %s", data.Method, data.URL)
+		}
 	}
 }
 
@@ -149,7 +154,12 @@ func (ei *EngineInfo) SaveResult() {
 		return
 	}
 	log.Logger.Infof("[  result  ] %d", len(ResultList))
-	ResultOutPutDir := path.Join(utils.GetCurrentDirectory(), "result", ei.HostName)
+	var ResultOutPutDir string
+	if conf.GlobalConfig.ResultConf.OutputDir == "" {
+		ResultOutPutDir = path.Join(utils.GetCurrentDirectory(), "result", ei.HostName)
+	} else {
+		ResultOutPutDir = conf.GlobalConfig.ResultConf.OutputDir
+	}
 	if !utils.IsExist(ResultOutPutDir) {
 		err := os.MkdirAll(ResultOutPutDir, os.ModePerm)
 		if err != nil {

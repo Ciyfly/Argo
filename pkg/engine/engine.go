@@ -23,15 +23,22 @@ import (
 	"github.com/go-rod/rod/lib/proto"
 )
 
+const (
+	HOME_PAGE_FLAG     = 0
+	NOT_HOME_PAGE_FLAG = 1
+	PAGE_TIMEOUT_FLAG  = 2
+	NOT_PAGE_TIME_FLAG = 3
+)
+
 type EngineInfo struct {
-	Browser   *rod.Browser
-	Options   conf.BrowserConf
-	Launcher  *launcher.Launcher
-	CloseChan chan int
-	Target    string
-	Host      string
-	HostName  string
-	TabCount  int
+	Browser            *rod.Browser
+	Options            conf.BrowserConf
+	Launcher           *launcher.Launcher
+	FirstPageCloseChan chan bool
+	Target             string
+	Host               string
+	HostName           string
+	TabCount           int
 }
 
 type UrlInfo struct {
@@ -64,7 +71,7 @@ func InitEngine(target string) *EngineInfo {
 
 func InitBrowser(target string) *EngineInfo {
 	// 初始化
-	browser := rod.New().Timeout(time.Duration(conf.GlobalConfig.BrowserConf.BrowserTimeout) * time.Second)
+	browser := rod.New()
 	// 启动无痕
 	if conf.GlobalConfig.BrowserConf.Trace {
 		browser = browser.Trace(true)
@@ -72,6 +79,11 @@ func InitBrowser(target string) *EngineInfo {
 	// options := launcher.New().Devtools(true)
 	//  NoSandbox fix linux下root运行报错的问题
 	options := launcher.New().NoSandbox(true).Headless(true)
+	// 指定chrome浏览器路径
+	if conf.GlobalConfig.BrowserConf.Chrome != "" {
+		log.Logger.Infof("chrome path: %s", conf.GlobalConfig.BrowserConf.Chrome)
+		options.Bin(conf.GlobalConfig.BrowserConf.Chrome)
+	}
 	// 禁用所有提示防止阻塞 浏览器
 	options = options.Append("disable-infobars", "")
 	options = options.Append("disable-extensions", "")
@@ -88,18 +100,61 @@ func InitBrowser(target string) *EngineInfo {
 		options.Proxy(proxyURL.String())
 	}
 	browser = browser.ControlURL(options.MustLaunch()).MustConnect().NoDefaultDevice().MustIncognito()
-	closeChan := make(chan int, 1)
+	firstPageCloseChan := make(chan bool, 1)
 	u, _ := url.Parse(target)
 
 	return &EngineInfo{
-		Browser:   browser,
-		Options:   conf.GlobalConfig.BrowserConf,
-		Launcher:  options,
-		CloseChan: closeChan,
-		Target:    target,
-		Host:      u.Host,
-		HostName:  u.Hostname(),
+		Browser:            browser,
+		Options:            conf.GlobalConfig.BrowserConf,
+		Launcher:           options,
+		FirstPageCloseChan: firstPageCloseChan,
+		Target:             target,
+		Host:               u.Host,
+		HostName:           u.Hostname(),
 	}
+}
+
+func (ei *EngineInfo) CloseBrowser() {
+	if ei.Browser != nil {
+		closeErr := ei.Browser.Close()
+		if closeErr != nil {
+			log.Logger.Errorf("browser close err: %s", closeErr)
+
+		} else {
+			log.Logger.Debug("browser close over")
+		}
+	}
+
+}
+
+func (ei *EngineInfo) Finish() {
+	// 1. 任务完成 2. 浏览器超时
+	taskOverChan := make(chan bool, 1)
+	go func() {
+		// 任务完成
+		// 当第一个页面访问完成后才会关闭
+		<-ei.FirstPageCloseChan
+		log.Logger.Debug("first page over")
+		// url队列为空 没有新增的url需要测试了
+		urlsQueueEmpty()
+		log.Logger.Debug("urlsQueueEmpty over")
+		// tab 的协程都完成了
+		TabWg.Wait()
+		log.Logger.Debug("tabPool over")
+		// 关闭浏览器
+		ei.CloseBrowser()
+		taskOverChan <- true
+	}()
+	select {
+	case <-taskOverChan:
+		log.Logger.Debug("task over")
+	// 浏览器超时
+	case <-time.After(time.Duration(conf.GlobalConfig.BrowserConf.BrowserTimeout) * time.Second):
+		log.Logger.Warnf("browser timeout, close browser %ds", conf.GlobalConfig.BrowserConf.BrowserTimeout)
+		ei.CloseBrowser()
+	}
+	log.Logger.Debug("Close NormalizeQueue")
+	CloseNormalizeQueue()
 }
 
 func (ei *EngineInfo) Start() {
@@ -185,6 +240,7 @@ func (ei *EngineInfo) Start() {
 
 	})
 	go router.Run()
+	// 这个是 robots.txt|sitemap.xml 爬取解析的
 	var metadataWg sync.WaitGroup
 	metadataList := static.MetaDataSpider(ei.Target)
 	for _, staticUrl := range metadataList {
@@ -195,38 +251,18 @@ func (ei *EngineInfo) Start() {
 			PushStaticUrl(&UrlInfo{Url: staticUrl, SourceType: "metadata parse", SourceUrl: "robots.txt|sitemap.xml", Depth: 0})
 		}(staticUrl)
 	}
+	// 等待 metadata 爬取完成
 	metadataWg.Wait()
 	// 打开第一个tab页面 这里应该提交url管道任务
 	TabWg.Add(1)
-	go ei.NewTab(&UrlInfo{Url: ei.Target, Depth: 0}, 0)
-	// 元数据文件 rotbots.txt sitemap.xml
-	// 结束
-	// 0. 首页解析完成
-	// 1. url管道没有数据
-	// 2. 携程池任务完成
-	// 3. 没有tab页面存在
+	go ei.NewTab(&UrlInfo{Url: ei.Target, Depth: 0}, HOME_PAGE_FLAG)
+	// dev模式的时候不会结束 为了从浏览器界面调试查看需要手动关闭
 	if conf.GlobalConfig.Dev {
 		log.Logger.Warn("!!! dev mode please ctrl +c kill !!!")
 		select {}
 	}
-	<-ei.CloseChan
-	log.Logger.Debug("first page over")
-	urlsQueueEmpty()
-	log.Logger.Debug("urlsQueueEmpty over")
-	TabWg.Wait()
-	log.Logger.Debug("tabPool over")
-	if ei.Browser != nil {
-		closeErr := ei.Browser.Close()
-		if closeErr != nil {
-			log.Logger.Errorf("browser close err: %s", closeErr)
-
-		} else {
-			log.Logger.Debug("browser close over")
-		}
-	}
-	CloseNormalizeQueue()
-	PendingNormalizeQueueEmpty()
-	log.Logger.Debug("pendingNormalizeQueueEmpty over")
+	// 结束
+	ei.Finish()
 	ei.Launcher.Kill()
 	ei.SaveResult()
 }

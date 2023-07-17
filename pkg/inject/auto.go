@@ -80,6 +80,7 @@ function run(){
         observer.observe(window.document, {
             subtree: true,
             childList: true,
+            characterData: true,
             attributes: true,
             attributeFilter: ['src', 'href', 'action']
         });

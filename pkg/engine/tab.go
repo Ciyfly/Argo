@@ -32,12 +32,8 @@ var TabLimit chan int
 // TabLimit 关闭flag
 var TabLimitCloseFlag bool
 
-func (ei *EngineInfo) closeTab(page *rod.Page, flag int, tabDone chan bool) {
-	if flag == 0 {
-		ei.FirstPageCloseChan <- true
-		// first 手动done
-		TabWg.Done()
-	}
+func (ei *EngineInfo) closeTab(page *rod.Page, homePageFlag int, timeoutFlage int, tabDone chan bool) {
+
 	log.Logger.Debugf("TabLimit  1: %d", len(TabLimit))
 	pages, _ := ei.Browser.Pages()
 	pagesCount := len(pages)
@@ -49,14 +45,31 @@ func (ei *EngineInfo) closeTab(page *rod.Page, flag int, tabDone chan bool) {
 	pages, _ = ei.Browser.Pages()
 	pagesCount = len(pages)
 	log.Logger.Debugf("page count: %d", pagesCount)
-	tabDone <- true
+	if timeoutFlage == NOT_PAGE_TIME_FLAG {
+		tabDone <- true
+	}
+	if homePageFlag == HOME_PAGE_FLAG {
+		ei.FirstPageCloseChan <- true
+		// first 手动done
+		TabWg.Done()
+	}
 }
 
-func (ei *EngineInfo) NewTab(uif *UrlInfo, flag int) {
+func (ei *EngineInfo) NormalCloseTab(page *rod.Page, homePageFlag int, tabDone chan bool) {
+	ei.closeTab(page, homePageFlag, NOT_PAGE_TIME_FLAG, tabDone)
+}
+func (ei *EngineInfo) TimeoutCloseTab(page *rod.Page, homePageFlag int, tabDone chan bool) {
+
+	ei.closeTab(page, homePageFlag, PAGE_TIMEOUT_FLAG, tabDone)
+}
+
+func (ei *EngineInfo) NewTab(uif *UrlInfo, homePageFlag int) {
 
 	// tab关闭通道
 	tabDone := make(chan bool, 1)
 	var page *rod.Page
+	var NormalDoneFlag = false
+	var TimeoutDoneFlag = false
 	if TabLimitCloseFlag {
 		return
 	}
@@ -69,21 +82,21 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, flag int) {
 		info, err := utils.GetPageInfoByPage(page)
 		if err != nil {
 			// 超时干掉了page
-			ei.closeTab(page, flag, tabDone)
+			ei.NormalCloseTab(page, homePageFlag, tabDone)
 			return
 		}
 		html, _ := page.HTML()
 		if strings.Contains(info.Title, "404") || static.Match404ResponsePage([]byte(html)) {
-			ei.closeTab(page, flag, tabDone)
+			ei.NormalCloseTab(page, homePageFlag, tabDone)
 			return
 		}
 		// 调试模式 手动去操作 停止所有
 		if conf.GlobalConfig.Dev {
-			// ei.closeTab(page, flag)
+			// ei.NormalCloseTab(page, homePageFlag)
 			return
 		}
 
-		if flag == 0 {
+		if homePageFlag == HOME_PAGE_FLAG {
 			//  执行headless脚本 只有访问第一个页面的时候才会执行
 			if conf.GlobalConfig.PlaybackPath != "" {
 				log.Logger.Debugf("run playback script: %s", conf.GlobalConfig.PlaybackPath)
@@ -92,7 +105,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, flag int) {
 		}
 		if conf.GlobalConfig.TestPlayBack {
 			time.Sleep(time.Duration(conf.GlobalConfig.BrowserConf.TabTimeout) * time.Second)
-			ei.closeTab(page, flag, tabDone)
+			ei.NormalCloseTab(page, homePageFlag, tabDone)
 			return
 		}
 		// 设置超时时间
@@ -149,7 +162,10 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, flag int) {
 		}
 		// 所有url提交完成才能结束
 		PushUrlWg.Wait()
-		ei.closeTab(page, flag, tabDone)
+		NormalDoneFlag = true
+		if !TimeoutDoneFlag {
+			ei.NormalCloseTab(page, homePageFlag, tabDone)
+		}
 
 	}() // 协程
 	// 阻塞超时控制
@@ -158,7 +174,10 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, flag int) {
 		log.Logger.Debugf("[close tab ] => %s", uif.Url)
 	case <-time.After(time.Duration(conf.GlobalConfig.BrowserConf.TabTimeout) * time.Second):
 		log.Logger.Warnf("[timeout tab ] => %s", uif.Url)
-		ei.closeTab(page, flag, tabDone)
+		if !NormalDoneFlag {
+			TimeoutDoneFlag = true
+			ei.TimeoutCloseTab(page, homePageFlag, tabDone)
+		}
 	}
 }
 
@@ -201,9 +220,10 @@ func (ei *EngineInfo) TabWork() {
 					// 当前tab done 继续推送url
 					<-TabLimit
 					TabWg.Done()
+
 				}()
 				log.Logger.Debugf("[ new tab  ]=> %s", uif.Url)
-				ei.NewTab(uif, 1)
+				ei.NewTab(uif, NOT_HOME_PAGE_FLAG)
 			}()
 		default:
 			log.Logger.Debug("wait sleep 1s")

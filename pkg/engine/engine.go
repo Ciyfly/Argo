@@ -23,6 +23,13 @@ import (
 	"github.com/go-rod/rod/lib/proto"
 )
 
+const (
+	HOME_PAGE_FLAG     = 0
+	NOT_HOME_PAGE_FLAG = 1
+	PAGE_TIMEOUT_FLAG  = 2
+	NOT_PAGE_TIME_FLAG = 3
+)
+
 type EngineInfo struct {
 	Browser            *rod.Browser
 	Options            conf.BrowserConf
@@ -248,7 +255,7 @@ func (ei *EngineInfo) Start() {
 	metadataWg.Wait()
 	// 打开第一个tab页面 这里应该提交url管道任务
 	TabWg.Add(1)
-	go ei.NewTab(&UrlInfo{Url: ei.Target, Depth: 0}, 0)
+	go ei.NewTab(&UrlInfo{Url: ei.Target, Depth: 0}, HOME_PAGE_FLAG)
 	// dev模式的时候不会结束 为了从浏览器界面调试查看需要手动关闭
 	if conf.GlobalConfig.Dev {
 		log.Logger.Warn("!!! dev mode please ctrl +c kill !!!")

@@ -39,9 +39,20 @@ func handlerDynamicUrl(target string) string {
 
 }
 
+func getUrlByTag(t html.Token, currentUrl string) []string {
+	attr := t.Attr
+	urls := []string{}
+	for _, a := range attr {
+		if (a.Key == "href" || a.Key == "src" || a.Key == "action") && !strings.Contains(a.Val, "javascript") && a.Val != "#" {
+			log.Logger.Debugf("getUrlByTag %s", a.Val)
+			urls = append(urls, HandlerUrl(a.Val, currentUrl))
+		}
+	}
+	return urls
+}
 func ParseHtml(htmlStr, currentUrl string) []string {
 	staticUrlList := []string{}
-	// 获取到js 给parseJs
+	// 解析 html 获取所有的 url
 	tkn := html.NewTokenizer(strings.NewReader(htmlStr))
 	var tag string
 	for {
@@ -52,15 +63,10 @@ func ParseHtml(htmlStr, currentUrl string) []string {
 		case tt == html.StartTagToken:
 			t := tkn.Token()
 			tag = t.Data
-			if tag == "a" {
-				attr := t.Attr
-				for _, a := range attr {
-					if a.Key == "href" && !strings.Contains(a.Val, "javascript") && !strings.Contains(a.Val, "#") {
-						staticUrlList = append(staticUrlList, HandlerUrl(a.Val, currentUrl))
-					}
-				}
+			// 标签解析对应属性值
+			if tag == "a" || tag == "link" || tag == "frame" || tag == "form" {
+				staticUrlList = append(getUrlByTag(t, currentUrl), staticUrlList...)
 			} else if tag == "script" {
-
 				staticUrlList = append(staticUrlList, HandlerUrls(parseJs(t.String()), currentUrl)...)
 			}
 		case tt == html.CommentToken:
@@ -90,59 +96,73 @@ func absUrl(urlStr string) string {
 	return u.String()
 }
 
+// 判断一个 URL 是否为一个有效的 URL
+func isValidURL(urlStr string) bool {
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return false
+	}
+	if u.Scheme == "" || u.Host == "" {
+		return false
+	}
+	return true
+}
+
+// 根据当前 URL 和相对路径，生成一个有效的 URL
+func resolveRelativeURL(currentUrl, relativePath string) string {
+	parsedURL, _ := url.Parse(currentUrl)
+	basePath := strings.TrimSuffix(parsedURL.Path, filepath.Base(parsedURL.Path))
+	return parsedURL.Scheme + "://" + parsedURL.Host + filepath.Join(basePath, relativePath)
+}
+
 func HandlerUrl(urlStr, currentUrl string) string {
-	if !strings.Contains(urlStr, "http") {
+	parsedURL, _ := url.Parse(currentUrl)
+	if !strings.Contains(urlStr, "http") && !strings.HasPrefix(urlStr, "//") {
 		if len(urlStr) == 0 {
 			return ""
 		}
 		if urlStr[:1] == "/" {
-			// 如果 href开头是/ 那么就是以host的路由拼接 否则是以当前路由做拼接
-			parsedURL, _ := url.Parse(currentUrl)
+			// 如果 href 开头是 /，那么就是以 host 的路由拼接，否则是以当前路由做拼接
 			return parsedURL.Scheme + "://" + parsedURL.Host + urlStr
 		} else {
 			// path/index.php?id=1 -> /path/new.php
 			newUrl := handlerDynamicUrl(currentUrl) + urlStr
-			// http://testphp.vulnweb.com/hpp/?pp=12
+			// 处理相对路径
 			if strings.Contains(newUrl, "../") {
-				return absUrl(newUrl)
+				newUrl = resolveRelativeURL(currentUrl, newUrl)
 			}
+			// vm.gtimg.cn/thumbplayer/superplayer/1.15.22/superplayer.js
+			if strings.Count(newUrl, ".") > 3 {
+				newUrl = parsedURL.Scheme + "://" + "/" + newUrl
+			}
+			// 判断 newUrl 是否为一个有效的 URL，如果不是，则根据 currentUrl 构建一个有效的 URL
+			if !isValidURL(newUrl) {
+				newUrl = parsedURL.Scheme + "://" + parsedURL.Host + "/" + newUrl
+			}
+
 			return newUrl
-			// return handlerDynamicUrl(currentUrl) + urlStr
 		}
 	}
-	return urlStr
+	if strings.HasPrefix(urlStr, "//") {
+		return "http:" + urlStr
+	}
+	if strings.HasPrefix(urlStr, "http://") || strings.HasPrefix(urlStr, "https://") {
+		return urlStr
+	}
+	return ""
 }
 
+// 处理多个 URL，返回处理后的 URL 列表
 func HandlerUrls(urls []string, currentUrl string) []string {
-	newUrls := []string{}
-	for _, urlStr := range urls {
-		if !strings.Contains(urlStr, "http") {
-			if len(urlStr) == 0 {
-				continue
-			}
-			// xxx.php
-			if urlStr[:1] == "/" {
-				// /index.php -> host/index.php
-				parsedURL, _ := url.Parse(currentUrl)
-				newUrls = append(newUrls, parsedURL.Scheme+"://"+parsedURL.Host+urlStr)
-
-			} else {
-				if strings.Contains(urlStr, "www") {
-					continue
-				}
-				// path/index.php?id=1 -> /path/new.php
-				newUrl := handlerDynamicUrl(currentUrl) + urlStr
-				if strings.Contains(newUrl, "../") {
-					newUrls = append(newUrls, absUrl(newUrl))
-				} else {
-					newUrls = append(newUrls, absUrl(newUrl))
-				}
-			}
-		} else {
-			newUrls = append(newUrls, urlStr)
+	result := []string{}
+	for _, url := range urls {
+		log.Logger.Debugf("HandlerUrls %s", url)
+		newUrl := HandlerUrl(url, currentUrl)
+		if newUrl != "" && !utils.Contains(result, newUrl) {
+			result = append(result, newUrl)
 		}
 	}
-	return newUrls
+	return result
 }
 
 func ParseDom(page *rod.Page) []string {
@@ -155,6 +175,7 @@ func ParseDom(page *rod.Page) []string {
 	htmlStr, err := page.HTML()
 	parsedURL, _ := url.Parse(target)
 	strippedURL := parsedURL.Scheme + "://" + parsedURL.Host + parsedURL.Path
+	// 如果url不是以 / 结尾，那么就加上 /
 	if strippedURL[len(strippedURL)-1:] != "/" {
 		strippedURL = parsedURL.Scheme + "://" + parsedURL.Host + "/"
 	}

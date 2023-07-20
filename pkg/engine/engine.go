@@ -255,7 +255,7 @@ func (ei *EngineInfo) Start() {
 	metadataWg.Wait()
 	// 打开第一个tab页面 这里应该提交url管道任务
 	TabWg.Add(1)
-	go ei.NewTab(&UrlInfo{Url: ei.Target, Depth: 0}, HOME_PAGE_FLAG)
+	go ei.NewTab(&UrlInfo{Url: ei.Target, Depth: 0, SourceType: "homePage", SourceUrl: "target"}, HOME_PAGE_FLAG)
 	// dev模式的时候不会结束 为了从浏览器界面调试查看需要手动关闭
 	if conf.GlobalConfig.Dev {
 		log.Logger.Warn("!!! dev mode please ctrl +c kill !!!")

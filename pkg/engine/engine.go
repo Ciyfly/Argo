@@ -8,6 +8,7 @@ import (
 	"argo/pkg/req"
 	"argo/pkg/static"
 	"argo/pkg/utils"
+	"argo/pkg/vector"
 	"bytes"
 	"io"
 	"io/ioutil"
@@ -28,6 +29,7 @@ const (
 	NOT_HOME_PAGE_FLAG = 1
 	PAGE_TIMEOUT_FLAG  = 2
 	NOT_PAGE_TIME_FLAG = 3
+	PAGE404_FLAG       = 4
 )
 
 type EngineInfo struct {
@@ -39,6 +41,9 @@ type EngineInfo struct {
 	Host               string
 	HostName           string
 	TabCount           int
+	Page404PageURl     string
+	Page404Vector      vector.Vector
+	Page404Dict        map[string]int
 }
 
 type UrlInfo struct {
@@ -111,6 +116,7 @@ func InitBrowser(target string) *EngineInfo {
 		Target:             target,
 		Host:               u.Host,
 		HostName:           u.Hostname(),
+		Page404Dict:        make(map[string]int),
 	}
 }
 
@@ -212,6 +218,14 @@ func (ei *EngineInfo) Start() {
 						log.Logger.Warnf("404 response: %s", ctx.Request.URL().String())
 						return
 					}
+
+				}
+				if _, ok := ei.Page404Dict[ctx.Request.URL().String()]; ok {
+					return
+				}
+				if ctx.Request.URL().String() == ei.Page404PageURl {
+					// 随机请求的url 404
+					return
 				}
 				// fix 管道关闭了但是还推数据的问题
 				if NormalizeCloseChanFlag {
@@ -226,6 +240,7 @@ func (ei *EngineInfo) Start() {
 					ResponseHeaders: transformHttpHeaders(ctx.Response.Payload().ResponseHeaders),
 					Status:          ctx.Response.Payload().ResponseCode,
 				}
+
 				// update 优化可以不存储请求响应的字符串来优化内存性能
 				if !conf.GlobalConfig.NoReqRspStr {
 					pu.ResponseBody = utils.EncodeBase64(ctx.Response.Payload().Body)
@@ -254,8 +269,12 @@ func (ei *EngineInfo) Start() {
 	// 等待 metadata 爬取完成
 	metadataWg.Wait()
 	// 打开第一个tab页面 这里应该提交url管道任务
-	TabWg.Add(1)
+	TabWg.Add(2)
 	go ei.NewTab(&UrlInfo{Url: ei.Target, Depth: 0, SourceType: "homePage", SourceUrl: "target"}, HOME_PAGE_FLAG)
+	page404url := ei.Target + "/" + utils.GenRandStr()
+	ei.Page404PageURl = page404url
+	go ei.NewTab(&UrlInfo{Url: page404url, Depth: 0, SourceType: "404", SourceUrl: "404"}, PAGE404_FLAG)
+
 	// dev模式的时候不会结束 为了从浏览器界面调试查看需要手动关闭
 	if conf.GlobalConfig.Dev {
 		log.Logger.Warn("!!! dev mode please ctrl +c kill !!!")

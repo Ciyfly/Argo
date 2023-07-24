@@ -5,6 +5,7 @@ go 1.18
 require (
 	github.com/cheggaaa/pb/v3 v3.1.2
 	github.com/go-rod/rod v0.112.6
+	github.com/kljensen/snowball v0.8.0
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.8.1
 	github.com/tealeg/xlsx v1.0.5

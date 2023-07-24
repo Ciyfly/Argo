@@ -6,7 +6,7 @@ import (
 )
 
 var NotFoundKeyWords = []string{
-	"not found", "页面不存在",
+	"not found", "页面不存在", "<title>404",
 }
 
 // TODO: 优化页面相似度算法 匹配404页面

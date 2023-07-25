@@ -108,7 +108,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 		// 判断页面是不是404页面
 		currentPageVector := vector.HTMLToVector(html)
 		similarity := vector.CosineSimilarity(ei.Page404Vector, currentPageVector)
-		log.Logger.Warnf("similarity: %f", similarity)
+		log.Logger.Debugf("similarity: %f", similarity)
 		if similarity > 0.95 {
 			ei.Page404Dict[uif.Url] = 1
 			log.Logger.Debugf("similarity: %f", similarity)

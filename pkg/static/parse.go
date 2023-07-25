@@ -110,6 +110,9 @@ func isValidURL(urlStr string) bool {
 
 // 根据当前 URL 和相对路径，生成一个有效的 URL
 func resolveRelativeURL(currentUrl, relativePath string) string {
+	if strings.Contains(relativePath, "http") {
+		return relativePath
+	}
 	parsedURL, _ := url.Parse(currentUrl)
 	basePath := strings.TrimSuffix(parsedURL.Path, filepath.Base(parsedURL.Path))
 	return parsedURL.Scheme + "://" + parsedURL.Host + filepath.Join(basePath, relativePath)
@@ -120,6 +123,10 @@ func HandlerUrl(urlStr, currentUrl string) string {
 	if !strings.Contains(urlStr, "http") && !strings.HasPrefix(urlStr, "//") {
 		if len(urlStr) == 0 {
 			return ""
+		}
+		// mat1.gtimg.com/www/mb/js/portal/mi.MiniNav__v1.0.0.js
+		if strings.HasSuffix(urlStr, ".js") {
+			return parsedURL.Scheme + "://" + parsedURL.Host + urlStr
 		}
 		if urlStr[:1] == "/" {
 			// 如果 href 开头是 /，那么就是以 host 的路由拼接，否则是以当前路由做拼接
@@ -137,14 +144,14 @@ func HandlerUrl(urlStr, currentUrl string) string {
 			}
 			// 判断 newUrl 是否为一个有效的 URL，如果不是，则根据 currentUrl 构建一个有效的 URL
 			if !isValidURL(newUrl) {
-				newUrl = parsedURL.Scheme + "://" + parsedURL.Host + "/" + newUrl
+				newUrl = parsedURL.Scheme + "://" + urlStr
 			}
-
 			return newUrl
 		}
 	}
+
 	if strings.HasPrefix(urlStr, "//") {
-		return "http:" + urlStr
+		return parsedURL.Scheme + ":" + urlStr
 	}
 	if strings.HasPrefix(urlStr, "http://") || strings.HasPrefix(urlStr, "https://") {
 		return urlStr
@@ -156,8 +163,9 @@ func HandlerUrl(urlStr, currentUrl string) string {
 func HandlerUrls(urls []string, currentUrl string) []string {
 	result := []string{}
 	for _, url := range urls {
-		log.Logger.Debugf("HandlerUrls %s", url)
+		log.Logger.Debugf("HandlerUrl before%s", url)
 		newUrl := HandlerUrl(url, currentUrl)
+		log.Logger.Debugf("HandlerUrl after%s", newUrl)
 		if newUrl != "" && !utils.Contains(result, newUrl) {
 			result = append(result, newUrl)
 		}

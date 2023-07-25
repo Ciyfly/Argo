@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/go-rod/rod"
+	"github.com/go-rod/rod/lib/proto"
 )
 
 var usernameMatchList = []string{
@@ -249,11 +250,18 @@ func (lp *LoginAutoData) tryLogin() {
 				continue
 			}
 			for _, c := range children {
-				c.MustClick()
+				log.Logger.Debug("尝试点击登录按钮")
+				err := c.Click(proto.InputMouseButtonLeft, 1)
+				if err != nil {
+					log.Logger.Warnf("点击登录按钮失败 %s", err)
+				}
 			}
 		} else {
 			log.Logger.Debug("尝试点击登录按钮")
-			se.MustClick()
+			err := se.Click(proto.InputMouseButtonLeft, 1)
+			if err != nil {
+				log.Logger.Warnf("点击登录按钮失败 %s", err)
+			}
 		}
 	}
 }

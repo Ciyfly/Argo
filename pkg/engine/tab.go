@@ -8,6 +8,7 @@ import (
 	"argo/pkg/playback"
 	"argo/pkg/static"
 	"argo/pkg/utils"
+	"argo/pkg/vector"
 	"strings"
 	"sync"
 	"time"
@@ -32,7 +33,7 @@ var TabLimit chan int
 // TabLimit 关闭flag
 var TabLimitCloseFlag bool
 
-func (ei *EngineInfo) closeTab(page *rod.Page, homePageFlag int, timeoutFlage int, tabDone chan bool) {
+func (ei *EngineInfo) closeTab(page *rod.Page, pageFlag int, timeoutFlage int, tabDone chan bool) {
 
 	log.Logger.Debugf("TabLimit  1: %d", len(TabLimit))
 	pages, _ := ei.Browser.Pages()
@@ -48,22 +49,24 @@ func (ei *EngineInfo) closeTab(page *rod.Page, homePageFlag int, timeoutFlage in
 	if timeoutFlage == NOT_PAGE_TIME_FLAG {
 		tabDone <- true
 	}
-	if homePageFlag == HOME_PAGE_FLAG {
-		ei.FirstPageCloseChan <- true
-		// first 手动done
+	if pageFlag == HOME_PAGE_FLAG || pageFlag == PAGE404_FLAG {
+		if pageFlag == HOME_PAGE_FLAG {
+			ei.FirstPageCloseChan <- true
+		}
+		// 首页和404页面 手动done
 		TabWg.Done()
 	}
 }
 
-func (ei *EngineInfo) NormalCloseTab(page *rod.Page, homePageFlag int, tabDone chan bool) {
-	ei.closeTab(page, homePageFlag, NOT_PAGE_TIME_FLAG, tabDone)
+func (ei *EngineInfo) NormalCloseTab(page *rod.Page, pageFlag int, tabDone chan bool) {
+	ei.closeTab(page, pageFlag, NOT_PAGE_TIME_FLAG, tabDone)
 }
-func (ei *EngineInfo) TimeoutCloseTab(page *rod.Page, homePageFlag int, tabDone chan bool) {
+func (ei *EngineInfo) TimeoutCloseTab(page *rod.Page, pageFlag int, tabDone chan bool) {
 
-	ei.closeTab(page, homePageFlag, PAGE_TIMEOUT_FLAG, tabDone)
+	ei.closeTab(page, pageFlag, PAGE_TIMEOUT_FLAG, tabDone)
 }
 
-func (ei *EngineInfo) NewTab(uif *UrlInfo, homePageFlag int) {
+func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 
 	// tab关闭通道
 	tabDone := make(chan bool, 1)
@@ -82,21 +85,38 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, homePageFlag int) {
 		info, err := utils.GetPageInfoByPage(page)
 		if err != nil {
 			// 超时干掉了page
-			ei.NormalCloseTab(page, homePageFlag, tabDone)
+			ei.NormalCloseTab(page, pageFlag, tabDone)
 			return
 		}
 		html, _ := page.HTML()
 		if strings.Contains(info.Title, "404") || static.Match404ResponsePage([]byte(html)) {
-			ei.NormalCloseTab(page, homePageFlag, tabDone)
+			ei.NormalCloseTab(page, pageFlag, tabDone)
 			return
 		}
 		// 调试模式 手动去操作 停止所有
 		if conf.GlobalConfig.Dev {
-			// ei.NormalCloseTab(page, homePageFlag)
+			// ei.NormalCloseTab(page, pageFlag)
 			return
 		}
-
-		if homePageFlag == HOME_PAGE_FLAG {
+		// 404 页面判断
+		if pageFlag == PAGE404_FLAG {
+			html, _ := page.HTML()
+			ei.Page404Vector = vector.HTMLToVector(html)
+			ei.NormalCloseTab(page, pageFlag, tabDone)
+			return
+		}
+		// 判断页面是不是404页面
+		currentPageVector := vector.HTMLToVector(html)
+		similarity := vector.CosineSimilarity(ei.Page404Vector, currentPageVector)
+		log.Logger.Debugf("similarity: %f", similarity)
+		if similarity > 0.95 {
+			ei.Page404Dict[uif.Url] = 1
+			log.Logger.Debugf("similarity: %f", similarity)
+			log.Logger.Debugf("404 page: %s", uif.Url)
+			ei.NormalCloseTab(page, pageFlag, tabDone)
+			return
+		}
+		if pageFlag == HOME_PAGE_FLAG {
 			//  执行headless脚本 只有访问第一个页面的时候才会执行
 			if conf.GlobalConfig.PlaybackPath != "" {
 				log.Logger.Debugf("run playback script: %s", conf.GlobalConfig.PlaybackPath)
@@ -105,7 +125,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, homePageFlag int) {
 		}
 		if conf.GlobalConfig.TestPlayBack {
 			time.Sleep(time.Duration(conf.GlobalConfig.BrowserConf.TabTimeout) * time.Second)
-			ei.NormalCloseTab(page, homePageFlag, tabDone)
+			ei.NormalCloseTab(page, pageFlag, tabDone)
 			return
 		}
 		// 设置超时时间
@@ -164,7 +184,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, homePageFlag int) {
 		PushUrlWg.Wait()
 		NormalDoneFlag = true
 		if !TimeoutDoneFlag {
-			ei.NormalCloseTab(page, homePageFlag, tabDone)
+			ei.NormalCloseTab(page, pageFlag, tabDone)
 		}
 
 	}() // 协程
@@ -176,7 +196,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, homePageFlag int) {
 		log.Logger.Warnf("[timeout tab ] => %s", uif.Url)
 		if !NormalDoneFlag {
 			TimeoutDoneFlag = true
-			ei.TimeoutCloseTab(page, homePageFlag, tabDone)
+			ei.TimeoutCloseTab(page, pageFlag, tabDone)
 		}
 	}
 }

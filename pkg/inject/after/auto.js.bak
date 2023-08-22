@@ -111,16 +111,17 @@ function run(){
 
             }else if (node.tagName == "A"){
                 // A标签有url
-                console.log(node.attributes.href.nodeValue)
-                if (node.attributes.href.nodeValue.indexOf("javascript")==-1 && node.attributes.href.nodeValue!="#"){
-                    // url
-                    console.log("push -> ",node.attributes.href.nodeValue)
-                    HrefArrays.push(node.attributes.href.nodeValue)
-                }else{
-                    // javascript
-                    filterClick(node);
-                    await sleep(slow);
-
+                if (node.attributes.href && node.attributes.href.nodeValue){
+                    console.log(node.attributes.href.nodeValue)
+                    if (node.attributes.href.nodeValue.indexOf("javascript")==-1 && node.attributes.href.nodeValue!="#"){
+                        // url
+                        console.log("push -> ",node.attributes.href.nodeValue)
+                        HrefArrays.push(node.attributes.href.nodeValue)
+                    }else{
+                        // javascript
+                        filterClick(node);
+                        await sleep(slow);
+                    }
                 }
 
             }else if (node.tagName=="INPUT" &&  node.type=="submit" || node.tagName=="BUTTON" || node.tagName=="INPUT" &&  node.type=="button"){

@@ -136,6 +136,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 		// 延迟一会等待加载
 		// time.Sleep(3 * time.Second)
 		page.WaitLoad()
+		page.WaitIdle(3 * time.Second)
 		// 判断是否需要登录 需要的话进行自动化尝试登录
 		login.GlobalLoginAutoData.Handler(page)
 		// 注入js dom构建后

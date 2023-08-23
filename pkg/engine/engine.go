@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -103,6 +104,10 @@ func InitBrowser(target string) *EngineInfo {
 			log.Logger.Fatal("proxy err:", err)
 		}
 		options.Proxy(proxyURL.String())
+	}
+	// windows下 使用单进程 防止多个cmd窗口弹出
+	if runtime.GOOS == "windows" {
+		options = options.Set("single-process")
 	}
 	browser = browser.ControlURL(options.MustLaunch()).MustConnect().NoDefaultDevice().MustIncognito()
 	firstPageCloseChan := make(chan bool, 1)

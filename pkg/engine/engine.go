@@ -26,11 +26,13 @@ import (
 )
 
 const (
-	HOME_PAGE_FLAG     = 0
-	NOT_HOME_PAGE_FLAG = 1
-	PAGE_TIMEOUT_FLAG  = 2
-	NOT_PAGE_TIME_FLAG = 3
-	PAGE404_FLAG       = 4
+	HOME_PAGE_FLAG = iota
+	NOT_HOME_PAGE_FLAG
+	PAGE_TIMEOUT_FLAG
+	NOT_PAGE_TIME_FLAG
+	PAGE404_FLAG
+	RANDPAGE404_FLAG
+	TIMEOUT_PAHE
 )
 
 type EngineInfo struct {
@@ -54,8 +56,6 @@ type UrlInfo struct {
 	SourceUrl  string
 	Depth      int
 }
-
-// var EngineInfoData *EngineInfo
 
 func InitEngine(target string) *EngineInfo {
 	// 初始化 js注入插件
@@ -93,7 +93,9 @@ func InitBrowser(target string) *EngineInfo {
 	// 禁用所有提示防止阻塞 浏览器
 	options = options.Append("disable-infobars", "")
 	options = options.Append("disable-extensions", "")
-
+	options.Set("disable-web-security")
+	options.Set("allow-running-insecure-content")
+	options.Set("reduce-security-for-testing")
 	if conf.GlobalConfig.BrowserConf.UnHeadless || conf.GlobalConfig.Dev {
 		options = options.Delete("--headless")
 		browser = browser.SlowMotion(time.Duration(conf.GlobalConfig.AutoConf.Slow) * time.Second)
@@ -109,7 +111,9 @@ func InitBrowser(target string) *EngineInfo {
 	if runtime.GOOS == "windows" {
 		options = options.Set("single-process")
 	}
+	options.Set("", "about:blank")
 	browser = browser.ControlURL(options.MustLaunch()).MustConnect().NoDefaultDevice().MustIncognito()
+	browser.MustIgnoreCertErrors(true)
 	firstPageCloseChan := make(chan bool, 1)
 	u, _ := url.Parse(target)
 
@@ -145,26 +149,26 @@ func (ei *EngineInfo) Finish() {
 		// 任务完成
 		// 当第一个页面访问完成后才会关闭
 		<-ei.FirstPageCloseChan
-		log.Logger.Debug("first page over")
+		log.Logger.Debug("------------------------first page over------------------------")
 		// url队列为空 没有新增的url需要测试了
 		urlsQueueEmpty()
-		log.Logger.Debug("urlsQueueEmpty over")
+		log.Logger.Debug("------------------------urlsQueueEmpty over------------------------")
 		// tab 的协程都完成了
 		TabWg.Wait()
-		log.Logger.Debug("tabPool over")
+		log.Logger.Debug("------------------------tabPool over------------------------")
 		// 关闭浏览器
 		ei.CloseBrowser()
 		taskOverChan <- true
 	}()
 	select {
 	case <-taskOverChan:
-		log.Logger.Debug("task over")
+		log.Logger.Debug("------------------------task over------------------------")
 	// 浏览器超时
 	case <-time.After(time.Duration(conf.GlobalConfig.BrowserConf.BrowserTimeout) * time.Second):
-		log.Logger.Warnf("browser timeout, close browser %ds", conf.GlobalConfig.BrowserConf.BrowserTimeout)
+		log.Logger.Warnf("------------------------browser timeout, close browser %ds", conf.GlobalConfig.BrowserConf.BrowserTimeout)
 		ei.CloseBrowser()
 	}
-	log.Logger.Debug("Close NormalizeQueue")
+	log.Logger.Debug("------------------------Close NormalizeQueue------------------------")
 	CloseNormalizeQueue()
 }
 
@@ -274,12 +278,33 @@ func (ei *EngineInfo) Start() {
 	// 等待 metadata 爬取完成
 	metadataWg.Wait()
 	// 打开第一个tab页面 这里应该提交url管道任务
-	TabWg.Add(2)
-	go ei.NewTab(&UrlInfo{Url: ei.Target, Depth: 0, SourceType: "homePage", SourceUrl: "target"}, HOME_PAGE_FLAG)
+	// go ei.NewTab(&UrlInfo{Url: ei.Target, Depth: 0, SourceType: "homePage", SourceUrl: "target"}, HOME_PAGE_FLAG)
+	PushStaticUrl(&UrlInfo{Url: ei.Target, Depth: 0, SourceType: "homePage", SourceUrl: "target"})
 	page404url := ei.Target + "/" + utils.GenRandStr()
 	ei.Page404PageURl = page404url
-	go ei.NewTab(&UrlInfo{Url: page404url, Depth: 0, SourceType: "404", SourceUrl: "404"}, PAGE404_FLAG)
+	// go ei.NewTab(&UrlInfo{Url: page404url, Depth: 0, SourceType: "404", SourceUrl: "404"}, RANDPAGE404_FLAG)
+	PushStaticUrl(&UrlInfo{Url: page404url, Depth: 0, SourceType: "404", SourceUrl: "404"})
+	go func() {
+		for {
+			pages, err := ei.Browser.Pages()
+			if err != nil {
+				log.Logger.Errorf("time pages error: %s", err.Error())
+			}
+			for _, p := range pages {
+				info, _ := utils.GetPageInfoByPage(p)
+				if info != nil {
+					if info.URL == "about:blank#blocked" {
+						log.Logger.Debugf("!!!!!!!!! del about")
+						p.Close()
+					}
+				}
 
+			}
+			time.Sleep(3 * time.Second)
+		}
+
+	}()
+	// 定时清空 about:blank#blocked还有关闭异常的页面
 	// dev模式的时候不会结束 为了从浏览器界面调试查看需要手动关闭
 	if conf.GlobalConfig.Dev {
 		log.Logger.Warn("!!! dev mode please ctrl +c kill !!!")

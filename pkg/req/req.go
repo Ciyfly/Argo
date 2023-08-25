@@ -21,7 +21,7 @@ func WebUserAgent() string {
 
 func getHttpTransport(target string) (*http.Transport, *http.Request) {
 	request, _ := http.NewRequest("GET", target, nil)
-	request.Header.Set("Connection", "keep-alive")
+	// request.Header.Set("Connection", "keep-alive")
 	request.Header.Set("User-Agent", WebUserAgent())
 	if conf.GlobalConfig.BrowserConf.Proxy != "" {
 		proxy, _ := url.Parse(conf.GlobalConfig.BrowserConf.Proxy)

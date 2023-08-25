@@ -6,6 +6,7 @@ import (
 	"argo/pkg/log"
 	"argo/pkg/login"
 	"argo/pkg/playback"
+	"argo/pkg/req"
 	"argo/pkg/static"
 	"argo/pkg/utils"
 	"argo/pkg/vector"
@@ -36,32 +37,34 @@ var TabLimitCloseFlag bool
 func (ei *EngineInfo) closeTab(page *rod.Page, pageFlag int, timeoutFlage int, tabDone chan bool) {
 
 	log.Logger.Debugf("TabLimit  1: %d", len(TabLimit))
-	pages, _ := ei.Browser.Pages()
-	pagesCount := len(pages)
-	log.Logger.Debugf("page count: %d", pagesCount)
+	// pages, err := ei.Browser.Pages()
+	// if err != nil {
+	// 	log.Logger.Errorf("get Browser Pages error: %s", err.Error())
+	// }
+	// pagesCount := len(pages)
+	// log.Logger.Debugf("page count: %d", pagesCount)
 	if page != nil {
-		page.Close()
+		e := page.Close()
+		if e != nil {
+			log.Logger.Errorf("page close error: %s ", e.Error())
+		}
 	}
 	log.Logger.Debugf("TabLimit  2: %d", len(TabLimit))
-	pages, _ = ei.Browser.Pages()
-	pagesCount = len(pages)
-	log.Logger.Debugf("page count: %d", pagesCount)
 	if timeoutFlage == NOT_PAGE_TIME_FLAG {
 		tabDone <- true
 	}
-	if pageFlag == HOME_PAGE_FLAG || pageFlag == PAGE404_FLAG {
-		if pageFlag == HOME_PAGE_FLAG {
-			ei.FirstPageCloseChan <- true
-		}
-		// 首页和404页面 手动done
-		TabWg.Done()
+	if pageFlag == HOME_PAGE_FLAG {
+		ei.FirstPageCloseChan <- true
 	}
 }
 
 func (ei *EngineInfo) NormalCloseTab(page *rod.Page, pageFlag int, tabDone chan bool) {
+	log.Logger.Debugf("NormalCloseTab %d", pageFlag)
+
 	ei.closeTab(page, pageFlag, NOT_PAGE_TIME_FLAG, tabDone)
 }
 func (ei *EngineInfo) TimeoutCloseTab(page *rod.Page, pageFlag int, tabDone chan bool) {
+	log.Logger.Debugf("TimeoutCloseTab %d", pageFlag)
 
 	ei.closeTab(page, pageFlag, PAGE_TIMEOUT_FLAG, tabDone)
 }
@@ -80,17 +83,30 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 	ei.TabCount += 1
 	go func() {
 		// 创建tab
+		if !req.CheckTarget(uif.Url) {
+			log.Logger.Debugf("CheckTarget: %s ", uif.Url)
+			tabDone <- true
+			return
+		}
 		page, _ = ei.Browser.Page(proto.TargetCreateTarget{URL: uif.Url})
 		// log.Logger.Debug(page.HTML())
 		info, err := utils.GetPageInfoByPage(page)
 		if err != nil {
 			// 超时干掉了page
+			log.Logger.Errorf("GetPageInfoByPage: %s", err.Error())
+			ei.NormalCloseTab(page, pageFlag, tabDone)
+			return
+		}
+		// 404 页面判断
+		if pageFlag == RANDPAGE404_FLAG {
+			html, _ := page.HTML()
+			ei.Page404Vector = vector.HTMLToVector(html)
 			ei.NormalCloseTab(page, pageFlag, tabDone)
 			return
 		}
 		html, _ := page.HTML()
 		if strings.Contains(info.Title, "404") || static.Match404ResponsePage([]byte(html)) {
-			ei.NormalCloseTab(page, pageFlag, tabDone)
+			ei.NormalCloseTab(page, PAGE404_FLAG, tabDone)
 			return
 		}
 		// 调试模式 手动去操作 停止所有
@@ -98,13 +114,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 			// ei.NormalCloseTab(page, pageFlag)
 			return
 		}
-		// 404 页面判断
-		if pageFlag == PAGE404_FLAG {
-			html, _ := page.HTML()
-			ei.Page404Vector = vector.HTMLToVector(html)
-			ei.NormalCloseTab(page, pageFlag, tabDone)
-			return
-		}
+
 		// 判断页面是不是404页面
 		currentPageVector := vector.HTMLToVector(html)
 		similarity := vector.CosineSimilarity(ei.Page404Vector, currentPageVector)
@@ -113,6 +123,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 			ei.Page404Dict[uif.Url] = 1
 			log.Logger.Debugf("similarity: %f", similarity)
 			log.Logger.Debugf("404 page: %s", uif.Url)
+			log.Logger.Info("similarity")
 			ei.NormalCloseTab(page, pageFlag, tabDone)
 			return
 		}
@@ -128,15 +139,11 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 			ei.NormalCloseTab(page, pageFlag, tabDone)
 			return
 		}
-		// 设置超时时间
-		page.Timeout(time.Duration(conf.GlobalConfig.BrowserConf.TabTimeout) * time.Second)
 		log.Logger.Debugf("[ new tab  ]=> %s sourceType: %s sourceUrl: %s", uif.Url, uif.SourceType, uif.SourceUrl)
 		// 注入js dom构建前
 		inject.InjectScript(page, 0)
 		// 延迟一会等待加载
-		// time.Sleep(3 * time.Second)
 		page.WaitLoad()
-		page.WaitIdle(3 * time.Second)
 		// 判断是否需要登录 需要的话进行自动化尝试登录
 		login.GlobalLoginAutoData.Handler(page)
 		// 注入js dom构建后
@@ -172,6 +179,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 				PushStaticUrl(&UrlInfo{Url: staticUrl, SourceType: "auto js", SourceUrl: uif.Url, Depth: uif.Depth + 1})
 			}(staticUrl)
 		}
+
 		// 推送下如果 单纯的去修改当前页面url的形式
 		// https://spa5.scrape.center/page/1
 		if currentUrl != "" {
@@ -207,7 +215,7 @@ var urlsQueue chan *UrlInfo
 var tabQueue chan *UrlInfo
 
 func (ei *EngineInfo) InitTabPool() {
-	urlsQueue = make(chan *UrlInfo, 10000)
+	urlsQueue = make(chan *UrlInfo, 10000000)
 	tabQueue = make(chan *UrlInfo, conf.GlobalConfig.BrowserConf.TabCount)
 	TabLimit = make(chan int, conf.GlobalConfig.BrowserConf.TabCount)
 	go ei.StaticUrlWork()
@@ -229,6 +237,11 @@ func (ei *EngineInfo) TabWork() {
 		case TabLimit <- 1:
 			// 从队列中获取一个 URL 对象并创建新协程去处理它
 			uif := <-tabQueue
+			// 不包含根url的直接不进行访问
+			if !strings.Contains(uif.Url, ei.Host) {
+				<-TabLimit
+				continue
+			}
 			if uif.Depth > conf.GlobalConfig.BrowserConf.MaxDepth {
 				log.Logger.Debugf("[ Max Depth] => %s depth: %d", uif.Url, uif.Depth)
 				// 将当前并发数减 1
@@ -244,7 +257,11 @@ func (ei *EngineInfo) TabWork() {
 
 				}()
 				log.Logger.Debugf("[ new tab  ]=> %s", uif.Url)
-				ei.NewTab(uif, NOT_HOME_PAGE_FLAG)
+				if uif.SourceType == "homePage" {
+					ei.NewTab(uif, HOME_PAGE_FLAG)
+				} else {
+					ei.NewTab(uif, NOT_HOME_PAGE_FLAG)
+				}
 			}()
 		default:
 			log.Logger.Debug("wait sleep 1s")

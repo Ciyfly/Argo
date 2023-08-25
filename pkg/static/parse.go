@@ -189,6 +189,7 @@ func ParseDom(page *rod.Page) []string {
 	}
 	if err != nil {
 		log.Logger.Errorf("parseDemo error: %s", err)
+		return nil
 	}
 	return ParseHtml(htmlStr, strippedURL)
 }

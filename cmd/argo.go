@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"net/http"
 	_ "net/http/pprof"
 
 	cli "github.com/urfave/cli/v2"
@@ -233,7 +234,9 @@ func RunMain(c *cli.Context) error {
 	// 合并 命令行与 yaml
 	conf.MergeArgs(c)
 	// 浏览器引擎初始化
-
+	go func() {
+		http.ListenAndServe("0.0.0.0:5208", nil)
+	}()
 	for _, t := range conf.GlobalConfig.TargetList {
 		log.Logger.Infof("target: %s", t)
 		if !req.CheckTarget(t) {

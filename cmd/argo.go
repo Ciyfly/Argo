@@ -243,6 +243,9 @@ func RunMain(c *cli.Context) error {
 			log.Logger.Errorf("The target is inaccessible %s", t)
 			continue
 		}
+		// 创建一个结构体 里面没有浏览器 因为每个tab就是一个浏览器 只有目标和options
+		// 然后启动 多个浏览器 每个浏览器开一个tab页面
+		// 跟之前一样 tab里加浏览器 阻塞条件变成 第一个访问完 url没有值等 超时关闭tab和浏览器
 		eif := engine.InitEngine(t)
 		eif.Start()
 

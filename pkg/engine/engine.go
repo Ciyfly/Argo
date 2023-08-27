@@ -34,6 +34,7 @@ const (
 type EngineInfo struct {
 	BrowserList        []*rod.Browser
 	OptionsList        []*launcher.Launcher
+	Mutex              sync.Mutex
 	FirstPageCloseChan chan bool
 	Target             string
 	Host               string
@@ -80,9 +81,14 @@ func NewBrowserOptions() *launcher.Launcher {
 	// 禁用所有提示防止阻塞 浏览器
 	options = options.Append("disable-infobars", "")
 	options = options.Append("disable-extensions", "")
+	options = options.Append("new-window", "0")
+	options = options.Append("profile-directory", "Default")
 	options.Set("disable-web-security")
 	options.Set("allow-running-insecure-content")
 	options.Set("reduce-security-for-testing")
+	options.Set("ignore-certificate-errors")
+	options.Set("disable-popup-blocking")
+	options.Set("disable-gpu")
 	if conf.GlobalConfig.BrowserConf.UnHeadless || conf.GlobalConfig.Dev {
 		options = options.Delete("--headless")
 		// browser = browser.SlowMotion(time.Duration(conf.GlobalConfig.AutoConf.Slow) * time.Second)
@@ -153,10 +159,13 @@ func (ei *EngineInfo) Start() {
 }
 
 func (ei *EngineInfo) AddBrowser(browser *rod.Browser, options *launcher.Launcher) {
+	ei.Mutex.Lock()
 	ei.BrowserList = append(ei.BrowserList, browser)
 	ei.OptionsList = append(ei.OptionsList, options)
+	ei.Mutex.Unlock()
 }
 func (ei *EngineInfo) DelBrowser(delb *rod.Browser, delo *launcher.Launcher) {
+	ei.Mutex.Lock()
 	var newBrowserList []*rod.Browser
 	var newOptionsList []*launcher.Launcher
 	for _, b := range ei.BrowserList {
@@ -171,6 +180,7 @@ func (ei *EngineInfo) DelBrowser(delb *rod.Browser, delo *launcher.Launcher) {
 	}
 	ei.BrowserList = newBrowserList
 	ei.OptionsList = newOptionsList
+	ei.Mutex.Unlock()
 }
 func (ei *EngineInfo) Finish() {
 	// 1. 任务完成 2. 程序超时

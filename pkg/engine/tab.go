@@ -199,6 +199,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 		if pageError != nil {
 			page.Reload()
 		}
+		page.WaitLoad()
 		info, err := utils.GetPageInfoByPage(page)
 		if err != nil {
 			log.Logger.Errorf("GetPageInfoByPage: %s", err.Error())
@@ -251,8 +252,6 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 		log.Logger.Debugf("[ new tab  ]=> %s sourceType: %s sourceUrl: %s", uif.Url, uif.SourceType, uif.SourceUrl)
 		// 注入js dom构建前
 		inject.InjectScript(page, 0)
-		// 延迟一会等待加载
-		page.WaitLoad()
 		// 判断是否需要登录 需要的话进行自动化尝试登录
 		login.GlobalLoginAutoData.Handler(page)
 		// 注入js dom构建后
@@ -280,6 +279,11 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 			currentUrl = info.URL
 		}
 		log.Logger.Debugf("dynamic %s parse count: %d", uif.Url, len(staticUrlList))
+		// close tab browser
+		NormalDoneFlag = true
+		if !TimeoutDoneFlag {
+			ei.NormalCloseTab(browserInfo)
+		}
 		// 解析demo
 		for _, staticUrl := range hrefList {
 			PushUrlWg.Add(1)
@@ -288,7 +292,6 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 				PushStaticUrl(&UrlInfo{Url: staticUrl, SourceType: "auto js", SourceUrl: uif.Url, Depth: uif.Depth + 1})
 			}(staticUrl)
 		}
-
 		// 推送下如果 单纯的去修改当前页面url的形式
 		// https://spa5.scrape.center/page/1
 		if currentUrl != "" {
@@ -300,10 +303,6 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 		}
 		// 所有url提交完成才能结束
 		PushUrlWg.Wait()
-		NormalDoneFlag = true
-		if !TimeoutDoneFlag {
-			ei.NormalCloseTab(browserInfo)
-		}
 
 	}() // 协程
 	// 阻塞超时控制

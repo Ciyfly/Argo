@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // 泛化去重
@@ -30,6 +31,8 @@ type PendingUrl struct {
 	ResponseBody    string
 	RequestStr      string
 }
+
+var mutex sync.Mutex
 
 func InitNormalize() {
 	PendingNormalizeQueue = make(chan *PendingUrl, 100)
@@ -140,10 +143,13 @@ func normalizeation(target, method string) string {
 func urlIsExists(target string) bool {
 	// 用来给 静态url 判断的
 	value := normalizeation(target, "GET")
+	mutex.Lock()
 	if _, ok := NormalizeationStaticMap[value]; !ok {
 		NormalizeationStaticMap[value] = 0
+		mutex.Unlock()
 		return false
 	}
+	mutex.Unlock()
 	return true
 }
 

@@ -194,24 +194,34 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 }
 
 // 接收所有静态url 来处理
-var urlsQueue chan *UrlInfo
-var tabQueue chan *UrlInfo
+var UrlsQueue chan *UrlInfo
+var UrlsQueueCloseFlag bool
+var TabQueue chan *UrlInfo
 
 func (ei *EngineInfo) InitTabPool() {
-	urlsQueue = make(chan *UrlInfo, 10000000)
-	tabQueue = make(chan *UrlInfo, conf.GlobalConfig.BrowserConf.TabCount)
+	UrlsQueue = make(chan *UrlInfo, 10000)
+	TabQueue = make(chan *UrlInfo, conf.GlobalConfig.BrowserConf.TabCount)
 	TabLimit = make(chan int, conf.GlobalConfig.BrowserConf.TabCount)
+	// for i := 1; i < conf.GlobalConfig.BrowserConf.TabCount; i++ {
 	go ei.StaticUrlWork()
+	// }
 	go ei.TabWork()
 }
 
+func CloseUrlQueue() {
+	UrlsQueueCloseFlag = true
+	close(UrlsQueue)
+}
 func PushStaticUrl(uif *UrlInfo) {
-	urlsQueue <- uif
+	if UrlsQueueCloseFlag {
+		return
+	}
+	UrlsQueue <- uif
 }
 
 func PushTabQueue(uif *UrlInfo) {
 	log.Logger.Debugf("submit url: %s sourceType: %s sourceUrl: %s", uif.Url, uif.SourceType, uif.SourceUrl)
-	tabQueue <- uif
+	TabQueue <- uif
 }
 
 func (ei *EngineInfo) TabWork() {
@@ -219,7 +229,10 @@ func (ei *EngineInfo) TabWork() {
 		select {
 		case TabLimit <- 1:
 			// 从队列中获取一个 URL 对象并创建新协程去处理它
-			uif := <-tabQueue
+			uif, ok := <-TabQueue
+			if !ok {
+				return
+			}
 			// 不包含根url的直接不进行访问
 			if !strings.Contains(uif.Url, ei.Host) {
 				<-TabLimit
@@ -256,7 +269,10 @@ func (ei *EngineInfo) TabWork() {
 
 func (ei *EngineInfo) StaticUrlWork() {
 	for {
-		uif := <-urlsQueue
+		uif, ok := <-UrlsQueue
+		if !ok {
+			return
+		}
 		if uif.Url == "" {
 			continue
 		}
@@ -276,7 +292,7 @@ func (ei *EngineInfo) StaticUrlWork() {
 
 func urlsQueueEmpty() {
 	for {
-		if len(urlsQueue) == 0 {
+		if len(UrlsQueue) == 0 {
 			break
 		}
 		time.Sleep(1 * time.Second)

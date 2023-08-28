@@ -147,7 +147,7 @@ func (ei *EngineInfo) CloseBrowser() {
 
 func (ei *EngineInfo) Finish() {
 	// 1. 任务完成 2. 浏览器超时
-	taskOverChan := make(chan bool, 1)
+	tabOverChan := make(chan bool, 1)
 	go func() {
 		// 任务完成
 		// 当第一个页面访问完成后才会关闭
@@ -161,10 +161,10 @@ func (ei *EngineInfo) Finish() {
 		log.Logger.Debug("------------------------tabPool over------------------------")
 		// 关闭浏览器
 		ei.CloseBrowser()
-		taskOverChan <- true
+		tabOverChan <- true
 	}()
 	select {
-	case <-taskOverChan:
+	case <-tabOverChan:
 		log.Logger.Debug("------------------------task over------------------------")
 	// 浏览器超时
 	case <-time.After(time.Duration(conf.GlobalConfig.BrowserConf.BrowserTimeout) * time.Second):
@@ -173,6 +173,7 @@ func (ei *EngineInfo) Finish() {
 	}
 	log.Logger.Debug("------------------------Close NormalizeQueue------------------------")
 	CloseNormalizeQueue()
+	CloseUrlQueue()
 }
 
 func (ei *EngineInfo) Start() {

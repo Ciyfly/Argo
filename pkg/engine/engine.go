@@ -40,6 +40,7 @@ type EngineInfo struct {
 	Options            conf.BrowserConf
 	Launcher           *launcher.Launcher
 	FirstPageCloseChan chan bool
+	MonitorChan        chan bool
 	Target             string
 	Host               string
 	HostName           string
@@ -115,6 +116,7 @@ func InitBrowser(target string) *EngineInfo {
 	browser = browser.ControlURL(options.MustLaunch()).MustConnect().NoDefaultDevice().MustIncognito()
 	browser.MustIgnoreCertErrors(true)
 	firstPageCloseChan := make(chan bool, 1)
+	monitorChan := make(chan bool, 1)
 	u, _ := url.Parse(target)
 
 	return &EngineInfo{
@@ -122,6 +124,7 @@ func InitBrowser(target string) *EngineInfo {
 		Options:            conf.GlobalConfig.BrowserConf,
 		Launcher:           options,
 		FirstPageCloseChan: firstPageCloseChan,
+		MonitorChan:        monitorChan,
 		Target:             target,
 		Host:               u.Host,
 		HostName:           u.Hostname(),
@@ -130,11 +133,11 @@ func InitBrowser(target string) *EngineInfo {
 }
 
 func (ei *EngineInfo) CloseBrowser() {
+	ei.MonitorChan <- true
 	if ei.Browser != nil {
 		closeErr := ei.Browser.Close()
 		if closeErr != nil {
 			log.Logger.Errorf("browser close err: %s", closeErr)
-
 		} else {
 			log.Logger.Debug("browser close over")
 		}
@@ -284,27 +287,34 @@ func (ei *EngineInfo) Start() {
 	ei.Page404PageURl = page404url
 	// go ei.NewTab(&UrlInfo{Url: page404url, Depth: 0, SourceType: "404", SourceUrl: "404"}, RANDPAGE404_FLAG)
 	PushStaticUrl(&UrlInfo{Url: page404url, Depth: 0, SourceType: "404", SourceUrl: "404"})
+	// 定时清空 about:blank#blocked 当浏览器也退出
 	go func() {
 		for {
-			pages, err := ei.Browser.Pages()
-			if err != nil {
-				log.Logger.Errorf("time pages error: %s", err.Error())
-			}
-			for _, p := range pages {
-				info, _ := utils.GetPageInfoByPage(p)
-				if info != nil {
-					if info.URL == "about:blank#blocked" {
-						log.Logger.Debugf("!!!!!!!!! del about")
-						p.Close()
-					}
+			select {
+			case <-ei.MonitorChan:
+				return
+			default:
+				pages, err := ei.Browser.Pages()
+				if err != nil {
+					log.Logger.Debugf("monitor get pages: %s", err)
+					time.Sleep(3 * time.Second)
+					continue
 				}
+				for _, p := range pages {
+					info, _ := utils.GetPageInfoByPage(p)
+					if info != nil {
+						if info.URL == "about:blank#blocked" {
+							log.Logger.Debugf("!!!!!!!!! del about")
+							p.Close()
+						}
+					}
 
+				}
+				time.Sleep(3 * time.Second)
 			}
-			time.Sleep(3 * time.Second)
 		}
 
 	}()
-	// 定时清空 about:blank#blocked还有关闭异常的页面
 	// dev模式的时候不会结束 为了从浏览器界面调试查看需要手动关闭
 	if conf.GlobalConfig.Dev {
 		log.Logger.Warn("!!! dev mode please ctrl +c kill !!!")

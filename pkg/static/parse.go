@@ -188,7 +188,7 @@ func ParseDom(page *rod.Page) []string {
 		strippedURL = parsedURL.Scheme + "://" + parsedURL.Host + "/"
 	}
 	if err != nil {
-		log.Logger.Errorf("parseDemo error: %s", err)
+		log.Logger.Debugf("parseDemo error: %s", err)
 		return nil
 	}
 	return ParseHtml(htmlStr, strippedURL)

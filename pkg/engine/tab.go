@@ -18,13 +18,6 @@ import (
 	"github.com/go-rod/rod/lib/proto"
 )
 
-type Faker struct {
-}
-
-func (f *Faker) Write(p []byte) (n int, err error) {
-	return 0, nil
-}
-
 // tab 协程组
 var TabWg sync.WaitGroup
 
@@ -37,12 +30,6 @@ var TabLimitCloseFlag bool
 func (ei *EngineInfo) closeTab(page *rod.Page, pageFlag int, timeoutFlage int, tabDone chan bool) {
 
 	log.Logger.Debugf("TabLimit  1: %d", len(TabLimit))
-	// pages, err := ei.Browser.Pages()
-	// if err != nil {
-	// 	log.Logger.Errorf("get Browser Pages error: %s", err.Error())
-	// }
-	// pagesCount := len(pages)
-	// log.Logger.Debugf("page count: %d", pagesCount)
 	if page != nil {
 		e := page.Close()
 		if e != nil {
@@ -59,44 +46,42 @@ func (ei *EngineInfo) closeTab(page *rod.Page, pageFlag int, timeoutFlage int, t
 }
 
 func (ei *EngineInfo) NormalCloseTab(page *rod.Page, pageFlag int, tabDone chan bool) {
-	log.Logger.Debugf("NormalCloseTab %d", pageFlag)
-
 	ei.closeTab(page, pageFlag, NOT_PAGE_TIME_FLAG, tabDone)
 }
 func (ei *EngineInfo) TimeoutCloseTab(page *rod.Page, pageFlag int, tabDone chan bool) {
-	log.Logger.Debugf("TimeoutCloseTab %d", pageFlag)
-
 	ei.closeTab(page, pageFlag, PAGE_TIMEOUT_FLAG, tabDone)
 }
 
 func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
-
+	// 测试不通直接放弃
+	if !req.CheckTarget(uif.Url) {
+		log.Logger.Debugf("CheckTarget: %s ", uif.Url)
+		return
+	}
 	// tab关闭通道
 	tabDone := make(chan bool, 1)
 	var page *rod.Page
+	var pageError error
 	var NormalDoneFlag = false
 	var TimeoutDoneFlag = false
 	if TabLimitCloseFlag {
 		return
 	}
 	var PushUrlWg sync.WaitGroup
-	ei.TabCount += 1
 	go func() {
 		// 创建tab
-		if !req.CheckTarget(uif.Url) {
-			log.Logger.Debugf("CheckTarget: %s ", uif.Url)
+		page, pageError = ei.Browser.Page(proto.TargetCreateTarget{URL: uif.Url})
+		if pageError != nil || page == nil {
 			tabDone <- true
 			return
 		}
-		page, _ = ei.Browser.Page(proto.TargetCreateTarget{URL: uif.Url})
-		// log.Logger.Debug(page.HTML())
+		page.WaitLoad()
 		info, err := utils.GetPageInfoByPage(page)
 		if err != nil {
-			// 超时干掉了page
-			log.Logger.Errorf("GetPageInfoByPage: %s", err.Error())
-			ei.NormalCloseTab(page, pageFlag, tabDone)
+			tabDone <- true
 			return
 		}
+		ei.TabCount += 1
 		// 404 页面判断
 		if pageFlag == RANDPAGE404_FLAG {
 			html, _ := page.HTML()
@@ -114,7 +99,6 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 			// ei.NormalCloseTab(page, pageFlag)
 			return
 		}
-
 		// 判断页面是不是404页面
 		currentPageVector := vector.HTMLToVector(html)
 		similarity := vector.CosineSimilarity(ei.Page404Vector, currentPageVector)
@@ -143,7 +127,6 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 		// 注入js dom构建前
 		inject.InjectScript(page, 0)
 		// 延迟一会等待加载
-		page.WaitLoad()
 		// 判断是否需要登录 需要的话进行自动化尝试登录
 		login.GlobalLoginAutoData.Handler(page)
 		// 注入js dom构建后

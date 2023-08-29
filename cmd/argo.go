@@ -135,7 +135,7 @@ func main() {
 		},
 		&cli.IntFlag{
 			Name:     "tabtimeout",
-			Value:    30,
+			Value:    10,
 			Usage:    "Set max tab run time, close if limit exceeded. Unit is seconds.",
 			Category: ConfigArgsGroup,
 		},
@@ -193,7 +193,7 @@ func main() {
 		},
 		&cli.IntFlag{
 			Name:     "maxdepth",
-			Value:    10,
+			Value:    5,
 			Usage:    "Scrape web content with increasing depth by crawling URLs, stop at max depth.",
 			Category: ConfigArgsGroup,
 		},
@@ -243,7 +243,9 @@ func RunMain(c *cli.Context) error {
 			log.Logger.Errorf("The target is inaccessible %s", t)
 			continue
 		}
+		log.Logger.Info("init engine")
 		eif := engine.InitEngine(t)
+		log.Logger.Info("argo start")
 		eif.Start()
 
 	}

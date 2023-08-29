@@ -6,7 +6,6 @@ import (
 	"argo/pkg/log"
 	"argo/pkg/login"
 	"argo/pkg/playback"
-	"argo/pkg/req"
 	"argo/pkg/static"
 	"argo/pkg/utils"
 	"argo/pkg/vector"
@@ -53,11 +52,6 @@ func (ei *EngineInfo) TimeoutCloseTab(page *rod.Page, pageFlag int, tabDone chan
 }
 
 func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
-	// 测试不通直接放弃
-	if !req.CheckTarget(uif.Url) {
-		log.Logger.Debugf("CheckTarget: %s ", uif.Url)
-		return
-	}
 	// tab关闭通道
 	tabDone := make(chan bool, 1)
 	var page *rod.Page
@@ -139,7 +133,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 				PushUrlWg.Add(1)
 				go func(staticUrl string) {
 					defer PushUrlWg.Done()
-					PushStaticUrl(&UrlInfo{Url: staticUrl, SourceType: "static parse", SourceUrl: uif.Url, Depth: uif.Depth + 1})
+					PushUrlQueue(&UrlInfo{Url: staticUrl, SourceType: "static parse", SourceUrl: uif.Url, Depth: uif.Depth + 1})
 				}(staticUrl)
 			}
 		}
@@ -150,6 +144,8 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 		var currentUrl = ""
 		if err != nil {
 			log.Logger.Debugf("page timeout:%s  %s", err, uif.Url)
+			tabDone <- true
+			return
 		} else {
 			currentUrl = info.URL
 		}
@@ -159,7 +155,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 			PushUrlWg.Add(1)
 			go func(staticUrl string) {
 				defer PushUrlWg.Done()
-				PushStaticUrl(&UrlInfo{Url: staticUrl, SourceType: "auto js", SourceUrl: uif.Url, Depth: uif.Depth + 1})
+				PushUrlQueue(&UrlInfo{Url: staticUrl, SourceType: "auto js", SourceUrl: uif.Url, Depth: uif.Depth + 1})
 			}(staticUrl)
 		}
 
@@ -169,7 +165,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 			PushUrlWg.Add(1)
 			go func(currentUrl string) {
 				defer PushUrlWg.Done()
-				PushStaticUrl(&UrlInfo{Url: info.URL, SourceType: "patch", SourceUrl: uif.Url, Depth: uif.Depth + 1})
+				PushUrlQueue(&UrlInfo{Url: info.URL, SourceType: "patch", SourceUrl: uif.Url, Depth: uif.Depth + 1})
 			}(currentUrl)
 		}
 		// 所有url提交完成才能结束
@@ -197,14 +193,15 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 var UrlsQueue chan *UrlInfo
 var UrlsQueueCloseFlag bool
 var TabQueue chan *UrlInfo
+var PendUrlQueue chan *UrlInfo
 
 func (ei *EngineInfo) InitTabPool() {
-	UrlsQueue = make(chan *UrlInfo, 10000)
+	UrlsQueue = make(chan *UrlInfo, 100000)
 	TabQueue = make(chan *UrlInfo, conf.GlobalConfig.BrowserConf.TabCount)
 	TabLimit = make(chan int, conf.GlobalConfig.BrowserConf.TabCount)
-	// for i := 1; i < conf.GlobalConfig.BrowserConf.TabCount; i++ {
-	go ei.StaticUrlWork()
-	// }
+	for i := 1; i < conf.GlobalConfig.BrowserConf.TabCount; i++ {
+		go ei.PendUrlWork()
+	}
 	go ei.TabWork()
 }
 
@@ -212,7 +209,7 @@ func CloseUrlQueue() {
 	UrlsQueueCloseFlag = true
 	close(UrlsQueue)
 }
-func PushStaticUrl(uif *UrlInfo) {
+func PushUrlQueue(uif *UrlInfo) {
 	if UrlsQueueCloseFlag {
 		return
 	}
@@ -220,7 +217,7 @@ func PushStaticUrl(uif *UrlInfo) {
 }
 
 func PushTabQueue(uif *UrlInfo) {
-	log.Logger.Debugf("submit url: %s sourceType: %s sourceUrl: %s", uif.Url, uif.SourceType, uif.SourceUrl)
+	log.Logger.Debugf("PushTabQueue url: %s sourceType: %s sourceUrl: %s", uif.Url, uif.SourceType, uif.SourceUrl)
 	TabQueue <- uif
 }
 
@@ -267,7 +264,7 @@ func (ei *EngineInfo) TabWork() {
 	}
 }
 
-func (ei *EngineInfo) StaticUrlWork() {
+func (ei *EngineInfo) PendUrlWork() {
 	for {
 		uif, ok := <-UrlsQueue
 		if !ok {
@@ -280,10 +277,15 @@ func (ei *EngineInfo) StaticUrlWork() {
 		if strings.Contains(uif.Url, "http") && !strings.Contains(uif.Url, ei.Host) {
 			continue
 		}
-		if filterStatic(uif.Url) {
-			// 静态资源不处理
+		if filterStaticPendUrl(uif.Url) {
+			// 静态资源不会去打开js
 			continue
 		} // 泛化后不重复才会请求
+		// 这里测试验证反而会降低
+		// if !req.CheckTarget(uif.Url) {
+		// 	log.Logger.Debugf("CheckTarget: %s ", uif.Url)
+		// 	return
+		// }
 		if !urlIsExists(uif.Url) {
 			PushTabQueue(uif)
 		}

@@ -18,7 +18,7 @@ var PendingNormalizeQueue chan *PendingUrl
 var NormalizeCloseChan chan int
 var NormalizeCloseChanFlag bool
 var NormalizeationResultMap map[string]int
-var NormalizeationStaticMap map[string]int
+var NormalizeationPendUrlMap map[string]int
 
 type PendingUrl struct {
 	URL             string
@@ -35,10 +35,10 @@ type PendingUrl struct {
 var mutex sync.Mutex
 
 func InitNormalize() {
-	PendingNormalizeQueue = make(chan *PendingUrl, 100)
+	PendingNormalizeQueue = make(chan *PendingUrl, 10000)
 	NormalizeCloseChan = make(chan int)
 	NormalizeationResultMap = make(map[string]int)
-	NormalizeationStaticMap = make(map[string]int)
+	NormalizeationPendUrlMap = make(map[string]int)
 	NormalizeCloseChanFlag = false
 	go normalizeWork()
 }
@@ -54,8 +54,8 @@ func pushpendingNormalizeQueue(pu *PendingUrl) {
 func normalizeWork() {
 	// 泛化管道 接收流量劫持的
 	for {
-		data, close := <-PendingNormalizeQueue
-		if !close {
+		data, ok := <-PendingNormalizeQueue
+		if !ok {
 			NormalizeCloseChan <- 0
 			return
 		}
@@ -96,17 +96,15 @@ func normalizeationPath(pathStr string) string {
 }
 
 func normalizeation(target, method string) string {
-	// 参数泛化
-	// 泛化方法 这里先已url泛化来去重
-	// 对 URL 中的查询参数进行排序，并将数字替换为 "@"
 	u, _ := url.Parse(target)
+	// 参数泛化
 	params := u.Query()
 	keys := make([]string, 0, len(params))
 	for k := range params {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	paramsStr := ""
+	var paramsStr string
 	for _, k := range keys {
 		values := params[k]
 		for _, v := range values {
@@ -122,8 +120,6 @@ func normalizeation(target, method string) string {
 	if u.Path != "" {
 		norPath := normalizeationPath(u.Path)
 		normalizeStr += norPath
-		// normalizeStr += u.Path
-
 	}
 	if paramsStr != "" {
 		normalizeStr += paramsStr
@@ -135,7 +131,13 @@ func normalizeation(target, method string) string {
 	} else {
 		normalizeStr = method + "|" + normalizeStr
 	}
-	log.Logger.Debugf("normalizeStr url %s -> %s", u, normalizeStr)
+	// 使用 strings.Builder 来构建字符串
+	var sb strings.Builder
+	sb.WriteString("normalizeStr url ")
+	sb.WriteString(u.String())
+	sb.WriteString(" -> ")
+	sb.WriteString(normalizeStr)
+	log.Logger.Debugf(sb.String())
 
 	return utils.GetMD5(normalizeStr)
 }
@@ -144,8 +146,8 @@ func urlIsExists(target string) bool {
 	// 用来给 静态url 判断的
 	value := normalizeation(target, "GET")
 	mutex.Lock()
-	if _, ok := NormalizeationStaticMap[value]; !ok {
-		NormalizeationStaticMap[value] = 0
+	if _, ok := NormalizeationPendUrlMap[value]; !ok {
+		NormalizeationPendUrlMap[value] = 0
 		mutex.Unlock()
 		return false
 	}

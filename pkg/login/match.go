@@ -253,14 +253,14 @@ func (lp *LoginAutoData) tryLogin() {
 				log.Logger.Debug("尝试点击登录按钮")
 				err := c.Click(proto.InputMouseButtonLeft, 1)
 				if err != nil {
-					log.Logger.Warnf("点击登录按钮失败 %s", err)
+					log.Logger.Debugf("点击登录按钮失败 %s", err)
 				}
 			}
 		} else {
 			log.Logger.Debug("尝试点击登录按钮")
 			err := se.Click(proto.InputMouseButtonLeft, 1)
 			if err != nil {
-				log.Logger.Warnf("点击登录按钮失败 %s", err)
+				log.Logger.Debugf("点击登录按钮失败 %s", err)
 			}
 		}
 	}

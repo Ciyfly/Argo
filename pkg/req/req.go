@@ -5,7 +5,6 @@ import (
 	"argo/pkg/log"
 	"crypto/tls"
 	"encoding/base64"
-	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -19,47 +18,44 @@ func WebUserAgent() string {
 	return "Mozilla/5.0 (Macintosh; Intel Mac OS X 11_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36"
 }
 
-func getHttpTransport(target string) (*http.Transport, *http.Request) {
-	request, _ := http.NewRequest("GET", target, nil)
-	// request.Header.Set("Connection", "keep-alive")
+func getHttpClient(target, method string) (*http.Client, *http.Request) {
+	request, _ := http.NewRequest(method, target, nil)
 	request.Header.Set("User-Agent", WebUserAgent())
+	transport := &http.Transport{
+		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
+		IdleConnTimeout:     3 * time.Second,
+		MaxConnsPerHost:     5,
+		MaxIdleConns:        0,
+		MaxIdleConnsPerHost: 10,
+	}
 	if conf.GlobalConfig.BrowserConf.Proxy != "" {
 		proxy, _ := url.Parse(conf.GlobalConfig.BrowserConf.Proxy)
-		return &http.Transport{
-			Proxy:           http.ProxyURL(proxy),
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}, request
-	} else {
-		return &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}, request
+		transport.Proxy = http.ProxyURL(proxy)
 	}
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   time.Second * 3, // 超时时间
+	}
+	return client, request
 }
 
 func CheckTarget(target string) bool {
-	transport, request := getHttpTransport(target)
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   time.Second * 3, //超时时间
-	}
+	client, request := getHttpClient(target, "HEAD")
 	resp, err := client.Do(request)
 	if err != nil {
 		log.Logger.Debugf("req error: %s", err)
 		return false
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusOK {
-		return true
-	}
-	return false
+	return !(resp.StatusCode == http.StatusNotFound ||
+		resp.StatusCode == http.StatusForbidden ||
+		resp.StatusCode == http.StatusUnauthorized ||
+		resp.StatusCode == http.StatusServiceUnavailable ||
+		resp.StatusCode == http.StatusGatewayTimeout)
 }
 
 func GetResponse(target string) *http.Response {
-	transport, request := getHttpTransport(target)
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   time.Second * 3, //超时时间
-	}
+	client, request := getHttpClient(target, "GET")
 	resp, err := client.Do(request)
 	if err != nil {
 		return nil
@@ -77,7 +73,6 @@ func AbsoluteURL(path, scheme string) string {
 
 	absURL, err := url.Parse(path)
 	if err != nil {
-		fmt.Println(err)
 		return ""
 	}
 

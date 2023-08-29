@@ -173,7 +173,6 @@ func (ei *EngineInfo) Finish() {
 	}
 	log.Logger.Debug("------------------------Close NormalizeQueue------------------------")
 	CloseNormalizeQueue()
-	CloseUrlQueue()
 }
 
 func (ei *EngineInfo) Start() {
@@ -276,18 +275,17 @@ func (ei *EngineInfo) Start() {
 		log.Logger.Debugf("metadata parse: %s", staticUrl)
 		go func(staticUrl string) {
 			defer metadataWg.Done()
-			PushStaticUrl(&UrlInfo{Url: staticUrl, SourceType: "metadata parse", SourceUrl: "robots.txt|sitemap.xml", Depth: 0})
+			PushUrlQueue(&UrlInfo{Url: staticUrl, SourceType: "metadata parse", SourceUrl: "robots.txt|sitemap.xml", Depth: 0})
 		}(staticUrl)
 	}
 	// 等待 metadata 爬取完成
 	metadataWg.Wait()
 	// 打开第一个tab页面 这里应该提交url管道任务
-	// go ei.NewTab(&UrlInfo{Url: ei.Target, Depth: 0, SourceType: "homePage", SourceUrl: "target"}, HOME_PAGE_FLAG)
-	PushStaticUrl(&UrlInfo{Url: ei.Target, Depth: 0, SourceType: "homePage", SourceUrl: "target"})
+	PushUrlQueue(&UrlInfo{Url: ei.Target, Depth: 0, SourceType: "homePage", SourceUrl: "target"})
 	page404url := ei.Target + "/" + utils.GenRandStr()
 	ei.Page404PageURl = page404url
 	// go ei.NewTab(&UrlInfo{Url: page404url, Depth: 0, SourceType: "404", SourceUrl: "404"}, RANDPAGE404_FLAG)
-	PushStaticUrl(&UrlInfo{Url: page404url, Depth: 0, SourceType: "404", SourceUrl: "404"})
+	PushUrlQueue(&UrlInfo{Url: page404url, Depth: 0, SourceType: "404", SourceUrl: "404"})
 	// 定时清空 about:blank#blocked 当浏览器也退出
 	go func() {
 		for {

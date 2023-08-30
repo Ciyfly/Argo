@@ -241,8 +241,8 @@ func (lp *LoginAutoData) tryLogin() {
 		// se.MustClick()
 		// se.Click()
 		// pointer-events: none;
-		pointerEvent := se.MustEval("()=>window.getComputedStyle(this,null).getPropertyValue('pointer-events')")
-		if pointerEvent.String() == "none" {
+		pointerEvent, _ := se.Eval("()=>window.getComputedStyle(this,null).getPropertyValue('pointer-events')")
+		if pointerEvent.Value.String() == "none" {
 			log.Logger.Debug("登录按钮存在 pointer-events 尝试点击子元素")
 			// 对子元素进行点击
 			children, err := se.Elements("")

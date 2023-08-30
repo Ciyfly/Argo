@@ -247,9 +247,7 @@ func RunMain(c *cli.Context) error {
 			log.Logger.Errorf("The target is inaccessible %s", t)
 			continue
 		}
-		log.Logger.Info("init engine")
 		eif := engine.InitEngine(t)
-		log.Logger.Info("argo start")
 		eif.Start()
 
 	}

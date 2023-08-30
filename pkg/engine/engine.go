@@ -170,6 +170,8 @@ func (ei *EngineInfo) Finish() {
 	case <-time.After(time.Duration(conf.GlobalConfig.BrowserConf.BrowserTimeout) * time.Second):
 		log.Logger.Warnf("------------------------browser timeout, close browser %ds", conf.GlobalConfig.BrowserConf.BrowserTimeout)
 		ei.CloseBrowser()
+		//超时的话 需要关闭各种管道
+		ClearChan()
 	}
 	log.Logger.Debug("------------------------Close NormalizeQueue------------------------")
 	CloseNormalizeQueue()
@@ -345,4 +347,17 @@ func transformHttpHeaders(rspHeaders []*proto.FetchHeaderEntry) http.Header {
 		newRspHeaders.Add(data.Name, data.Value)
 	}
 	return newRspHeaders
+}
+
+func ClearChan() {
+	for {
+		select {
+		case <-UrlsQueue:
+		case <-TabQueue:
+		case <-TabLimit:
+		case <-PendingNormalizeQueue:
+		default:
+			return
+		}
+	}
 }

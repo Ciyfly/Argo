@@ -196,7 +196,7 @@ var TabQueue chan *UrlInfo
 var PendUrlQueue chan *UrlInfo
 
 func (ei *EngineInfo) InitTabPool() {
-	UrlsQueue = make(chan *UrlInfo, 100000)
+	UrlsQueue = make(chan *UrlInfo, 10000)
 	TabQueue = make(chan *UrlInfo, conf.GlobalConfig.BrowserConf.TabCount)
 	TabLimit = make(chan int, conf.GlobalConfig.BrowserConf.TabCount)
 	for i := 1; i < conf.GlobalConfig.BrowserConf.TabCount; i++ {
@@ -245,8 +245,8 @@ func (ei *EngineInfo) TabWork() {
 			go func() {
 				defer func() {
 					// 当前tab done 继续推送url
-					<-TabLimit
 					TabWg.Done()
+					<-TabLimit
 
 				}()
 				log.Logger.Debugf("[ new tab  ]=> %s", uif.Url)

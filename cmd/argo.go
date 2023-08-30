@@ -7,17 +7,20 @@ import (
 	"argo/pkg/req"
 	"argo/pkg/updateself"
 	"fmt"
+	"io/ioutil"
+	golog "log"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
-
-	"net/http"
-	_ "net/http/pprof"
 
 	cli "github.com/urfave/cli/v2"
 )
 
 var Version = "v1.0"
+
+// 去除go http.head 请求出现的日志
 
 func SetupCloseHandler() {
 	c := make(chan os.Signal)
@@ -43,6 +46,7 @@ func main() {
 	// go func() {
 	// 	http.ListenAndServe("0.0.0.0:6060", nil)
 	// }()
+	golog.SetOutput(ioutil.Discard)
 	SetupCloseHandler()
 	app := cli.NewApp()
 	app.Name = "argo"
@@ -135,7 +139,7 @@ func main() {
 		},
 		&cli.IntFlag{
 			Name:     "tabtimeout",
-			Value:    10,
+			Value:    15,
 			Usage:    "Set max tab run time, close if limit exceeded. Unit is seconds.",
 			Category: ConfigArgsGroup,
 		},

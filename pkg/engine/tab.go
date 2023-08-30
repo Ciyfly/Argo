@@ -281,11 +281,7 @@ func (ei *EngineInfo) PendUrlWork() {
 			// 静态资源不会去打开js
 			continue
 		} // 泛化后不重复才会请求
-		// 这里测试验证反而会降低
-		// if !req.CheckTarget(uif.Url) {
-		// 	log.Logger.Debugf("CheckTarget: %s ", uif.Url)
-		// 	return
-		// }
+
 		if !urlIsExists(uif.Url) {
 			PushTabQueue(uif)
 		}

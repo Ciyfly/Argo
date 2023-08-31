@@ -156,6 +156,12 @@ func main() {
 			Category: ConfigArgsGroup,
 		},
 		&cli.StringFlag{
+			Name:     "remote",
+			Value:    "",
+			Usage:    "Specify remote Chrome address, e.g. --remote http://127.0.0.1:3000",
+			Category: ConfigArgsGroup,
+		},
+		&cli.StringFlag{
 			Name:     "save",
 			Usage:    "Result saved as 'target' by default. Use '--save test' to save as 'test'.",
 			Category: OutPutArgsGroup,

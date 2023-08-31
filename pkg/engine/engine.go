@@ -91,6 +91,7 @@ func InitBrowser(target string) *EngineInfo {
 		log.Logger.Infof("chrome path: %s", conf.GlobalConfig.BrowserConf.Chrome)
 		options.Bin(conf.GlobalConfig.BrowserConf.Chrome)
 	}
+
 	// 禁用所有提示防止阻塞 浏览器
 	options = options.Append("disable-infobars", "")
 	options = options.Append("disable-extensions", "")
@@ -113,7 +114,17 @@ func InitBrowser(target string) *EngineInfo {
 		options = options.Set("single-process")
 	}
 	options.Set("", "about:blank")
-	browser = browser.ControlURL(options.MustLaunch()).MustConnect().NoDefaultDevice().MustIncognito()
+	if conf.GlobalConfig.BrowserConf.Remote != "" {
+		log.Logger.Infof("chrome remote: %s", conf.GlobalConfig.BrowserConf.Remote)
+		browser = browser.ControlURL(conf.GlobalConfig.BrowserConf.Remote)
+	} else {
+		browser = browser.ControlURL(options.MustLaunch())
+	}
+	err := browser.Connect()
+	if err != nil {
+		log.Logger.Errorf("browser connect err:%s ", err)
+	}
+	browser.NoDefaultDevice().MustIncognito()
 	browser.MustIgnoreCertErrors(true)
 	firstPageCloseChan := make(chan bool, 1)
 	monitorChan := make(chan bool, 1)

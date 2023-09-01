@@ -19,6 +19,7 @@
 9. 支持url深度层数控制
 10. 支持控制是否存储完整请求响应base64字符串 json格式
 11. 支持程序自动升级 
+12. 支持 指定 远程浏览器 本地浏览器
 
 
 ## 安装
@@ -55,10 +56,12 @@ GLOBAL OPTIONS:
 
    Config
 
-   --browsertimeout value      Set max browser run time, close if limit exceeded. Unit is seconds. (default: 18000)
-   --maxdepth value            Scrape web content with increasing depth by crawling URLs, stop at max depth. (default: 10)
+   --browsertimeout value      Set max browser run time, close if limit exceeded. Unit is seconds. (default: 900)
+   --chrome value              Specify the Chrome executable path, e.g. --chrome /opt/google/chrome/chrome
+   --maxdepth value            Scrape web content with increasing depth by crawling URLs, stop at max depth. (default: 5)
+   --remote value              Specify remote Chrome address, e.g. --remote http://127.0.0.1:3000
    --tabcount value, -c value  The maximum number of tab pages that can be opened (default: 10)
-   --tabtimeout value          Set max tab run time, close if limit exceeded. Unit is seconds. (default: 30)
+   --tabtimeout value          Set max tab run time, close if limit exceeded. Unit is seconds. (default: 15)
 
    Data
 
@@ -76,8 +79,10 @@ GLOBAL OPTIONS:
 
    OutPut
 
-   --format value  Output format separated by commas, txt, json, xlsx, html supported. (default: "txt,json")
-   --save value    Result saved as 'target' by default. Use '--save test' to save as 'test'.
+   --format value     Output format separated by commas, txt, json, xlsx, html supported. (default: "txt,json")
+   --outputdir value  save output to directory
+   --quiet            Enable quiet mode to output only the URL information that has been retrieved, in JSON format (default: false)
+   --save value       Result saved as 'target' by default. Use '--save test' to save as 'test'.
 
    Update
 
@@ -90,6 +95,7 @@ GLOBAL OPTIONS:
    --proxy value                  Set up a proxy, for example, http://127.0.0.1:3128
    --target value, -t value       Specify the entry point for testing
    --targetsfile value, -f value  The file list has targets separated by new lines, like other tools we've used before.
+
 
 
 ```
@@ -139,6 +145,26 @@ http://192.168.192.128:8080/
 ./argo -f targets.txt  --format txt
 ```
 
+
+### 指定浏览器
+
+加了两个参数 一个是指定本地下载好的浏览器 一个是指定远程浏览器 
+
+远程浏览器可以使用 https://github.com/browserless/chrome  
+然后 运行 容器 监听端口 argo配置即可  
+```
+# 指定本地浏览器路径
+./argo -t http://192.168.192.128:8080/ --chrome chrome_path
+
+# 指定远程浏览器ip 端口
+./argo -t http://192.168.192.128:8080/ --remote http://127.0.0.1:3000
+```
+
+
+### 设置浏览器超时时间 页面超时时间
+
+浏览器默认超时时间 900s 
+
 ### 支持控制事件触发间隔 --slow
 默认是1000ms 即1s 事件如 输入 点击后会等待间隔时间后再继续触发  
 
@@ -162,7 +188,7 @@ http://192.168.192.128:8080/
 
 ### url深度层数控制
 
-默认是10 超过最大深度就会抛弃这个url  
+默认是3 超过最大深度就会抛弃这个url  
 ```
 ./argo -t http://192.168.192.128:8080/   --maxdepth 层数
 ```
@@ -223,7 +249,7 @@ argo的编译后的程序是 github action 自动编译的 当然可以自己编
 yum install pango.x86_64 libXcomposite.x86_64 libXcursor.x86_64 libXdamage.x86_64 libXext.x86_64 libXi.x86_64 libXtst.x86_64 cups-libs.x86_64 libXScrnSaver.x86_64 libXrandr.x86_64 GConf2.x86_64 alsa-lib.x86_64 atk.x86_64 gtk3.x86_64 -y
 
 # ubuntu
-apt-get install -yq --no-install-recommends libasound2 libatk1.0-0 libc6 libcairo2 libcups2 libdbus-1-3 libexpat1 libfontconfig1 libgcc1 libgconf-2-4 libgdk-pixbuf2.0-0 libglib2.0-0 libgtk-3-0 libnspr4 libpango-1.0-0 libpangocairo-1.0-0 libstdc++6 libx11-6 libx11-xcb1 libxcb1 libxcursor1 libxdamage1 libxext6 libxfixes3 libxi6 libxrandr2 libxrender1 libxss1 libxtst6 libnss3
+apt-get install -yq --no-install-recommends libasound2 libatk1.0-0 libc6 libcairo2 libcups2 libdbus-1-3 libexpat1 libfontconfig1 libgcc1 libgconf-2-4 libgdk-pixbuf2.0-0 libglib2.0-0 libgtk-3-0 libnspr4 libpango-1.0-0 libpangocairo-1.0-0 libstdc++6 libx11-6 libx11-xcb1 libxcb1 libxcursor1 libxdamage1 libxext6 libxfixes3 libxi6 libxrandr2 libxrender1 libxss1 libxtst6 libnss3 libgbm-dev
 ```
 
 ## 交流

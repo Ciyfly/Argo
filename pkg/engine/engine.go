@@ -123,6 +123,7 @@ func InitBrowser(target string) *EngineInfo {
 	err := browser.Connect()
 	if err != nil {
 		log.Logger.Errorf("browser connect err:%s ", err)
+		return nil
 	}
 	browser.NoDefaultDevice().MustIncognito()
 	browser.MustIgnoreCertErrors(true)

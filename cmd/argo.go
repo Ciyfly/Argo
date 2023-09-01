@@ -254,7 +254,9 @@ func RunMain(c *cli.Context) error {
 			continue
 		}
 		eif := engine.InitEngine(t)
-		eif.Start()
+		if eif != nil {
+			eif.Start()
+		}
 
 	}
 	return nil

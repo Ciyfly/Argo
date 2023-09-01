@@ -3,6 +3,7 @@ package engine
 import (
 	"argo/pkg/log"
 	"argo/pkg/utils"
+	"context"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -34,13 +35,13 @@ type PendingUrl struct {
 
 var mutex sync.Mutex
 
-func InitNormalize() {
+func InitNormalize(ctx context.Context) {
 	PendingNormalizeQueue = make(chan *PendingUrl, 10000)
 	NormalizeCloseChan = make(chan int)
 	NormalizeationResultMap = make(map[string]int)
 	NormalizeationPendUrlMap = make(map[string]int)
 	NormalizeCloseChanFlag = false
-	go normalizeWork()
+	go normalizeWork(ctx)
 }
 
 func pushpendingNormalizeQueue(pu *PendingUrl) {
@@ -51,28 +52,34 @@ func pushpendingNormalizeQueue(pu *PendingUrl) {
 	PendingNormalizeQueue <- pu
 }
 
-func normalizeWork() {
+func normalizeWork(ctx context.Context) {
 	// 泛化管道 接收流量劫持的
 	for {
-		data, ok := <-PendingNormalizeQueue
-		if !ok {
-			NormalizeCloseChan <- 0
+		select {
+		case <-ctx.Done():
 			return
-		}
-		// 获取后缀
-		urlStr := data.URL
-		// http://testphp.vulnweb.com/AJAX/styles.css#2378123687
-		idx := strings.LastIndex(urlStr, "#")
-		if idx != -1 {
-			urlStr = urlStr[:idx]
-		}
-		if !filterStatic(urlStr) {
-			value := normalizeation(urlStr, data.Method)
-			if _, ok := NormalizeationResultMap[value]; !ok {
-				NormalizeationResultMap[value] = 0
-				pushResult(data)
+		default:
+			data, ok := <-PendingNormalizeQueue
+			if !ok {
+				NormalizeCloseChan <- 0
+				return
+			}
+			// 获取后缀
+			urlStr := data.URL
+			// http://testphp.vulnweb.com/AJAX/styles.css#2378123687
+			idx := strings.LastIndex(urlStr, "#")
+			if idx != -1 {
+				urlStr = urlStr[:idx]
+			}
+			if !filterStatic(urlStr) {
+				value := normalizeation(urlStr, data.Method)
+				if _, ok := NormalizeationResultMap[value]; !ok {
+					NormalizeationResultMap[value] = 0
+					pushResult(data)
+				}
 			}
 		}
+
 	}
 
 }

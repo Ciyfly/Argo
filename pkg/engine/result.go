@@ -4,6 +4,7 @@ import (
 	"argo/pkg/conf"
 	"argo/pkg/log"
 	"argo/pkg/utils"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -31,11 +32,11 @@ var ResultList []*PendingUrl
 var ResultQueue chan *PendingUrl
 var FormatMap map[string]FormatOutputFunc
 
-func InitResultHandler() {
+func InitResultHandler(ctx context.Context) {
 	ResultList = make([]*PendingUrl, 0)
 	ResultQueue = make(chan *PendingUrl)
 	FormatMap = make(map[string]FormatOutputFunc)
-	go resultHandlerWork()
+	go resultHandlerWork(ctx)
 	FormatMap["json"] = writeResultToJson
 	FormatMap["txt"] = writeResultToText
 	FormatMap["xlsx"] = writeResultToXlsx
@@ -46,16 +47,26 @@ func pushResult(pu *PendingUrl) {
 	ResultQueue <- pu
 }
 
-func resultHandlerWork() {
-	for data := range ResultQueue {
-		if conf.GlobalConfig.Quiet {
-			jsonData, _ := json.Marshal(data)
-			fmt.Println(string(jsonData))
-		} else {
-			ResultList = append(ResultList, data)
-			log.Logger.Infof("[%s] %s", data.Method, data.URL)
+func resultHandlerWork(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			data, ok := <-ResultQueue
+			if !ok {
+				return
+			}
+			if conf.GlobalConfig.Quiet {
+				jsonData, _ := json.Marshal(data)
+				fmt.Println(string(jsonData))
+			} else {
+				ResultList = append(ResultList, data)
+				log.Logger.Infof("[%s] %s", data.Method, data.URL)
+			}
 		}
 	}
+
 }
 
 func writeResult(name string, data []byte) {

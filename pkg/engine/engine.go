@@ -10,6 +10,7 @@ import (
 	"argo/pkg/utils"
 	"argo/pkg/vector"
 	"bytes"
+	"context"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -48,6 +49,8 @@ type EngineInfo struct {
 	Page404PageURl     string
 	Page404Vector      vector.Vector
 	Page404Dict        map[string]int
+	Ctx                context.Context
+	Cancel             context.CancelFunc
 }
 
 type UrlInfo struct {
@@ -59,18 +62,20 @@ type UrlInfo struct {
 }
 
 func InitEngine(target string) *EngineInfo {
+	ctx, cacel := context.WithCancel(context.Background())
 	// 初始化 js注入插件
 	inject.LoadScript()
 	// 初始化 登录插件
 	login.InitLoginAuto()
 	// 初始化 泛化模块
-	InitNormalize()
+	InitNormalize(ctx)
 	// 初始化 结果处理模块
-	InitResultHandler()
+	InitResultHandler(ctx)
 	// 初始化静态资源过滤
 	InitFilter()
 	// 初始化浏览器
 	engineInfo := InitBrowser(target)
+	engineInfo.Ctx, engineInfo.Cancel = ctx, cacel
 	// 初始化tab控制携程池
 	engineInfo.InitTabPool()
 	return engineInfo
@@ -171,8 +176,6 @@ func (ei *EngineInfo) Finish() {
 		// tab 的协程都完成了
 		TabWg.Wait()
 		log.Logger.Debug("------------------------tabPool over------------------------")
-		// 关闭浏览器
-		ei.CloseBrowser()
 		tabOverChan <- true
 	}()
 	select {
@@ -181,12 +184,11 @@ func (ei *EngineInfo) Finish() {
 	// 浏览器超时
 	case <-time.After(time.Duration(conf.GlobalConfig.BrowserConf.BrowserTimeout) * time.Second):
 		log.Logger.Warnf("------------------------browser timeout, close browser %ds", conf.GlobalConfig.BrowserConf.BrowserTimeout)
-		ei.CloseBrowser()
-		//超时的话 需要关闭各种管道
-		ClearChan()
 	}
-	log.Logger.Debug("------------------------Close NormalizeQueue------------------------")
-	CloseNormalizeQueue()
+	ei.CloseBrowser()
+	ei.Cancel()
+	ClearChan()
+
 }
 
 func (ei *EngineInfo) Start() {

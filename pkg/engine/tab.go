@@ -224,6 +224,8 @@ func PushTabQueue(uif *UrlInfo) {
 func (ei *EngineInfo) TabWork() {
 	for {
 		select {
+		case <-ei.Ctx.Done():
+			return
 		case TabLimit <- 1:
 			// 从队列中获取一个 URL 对象并创建新协程去处理它
 			uif, ok := <-TabQueue
@@ -266,25 +268,31 @@ func (ei *EngineInfo) TabWork() {
 
 func (ei *EngineInfo) PendUrlWork() {
 	for {
-		uif, ok := <-UrlsQueue
-		if !ok {
+		select {
+		case <-ei.Ctx.Done():
 			return
-		}
-		if uif.Url == "" {
-			continue
-		}
-		// pass 掉host之外的域名
-		if strings.Contains(uif.Url, "http") && !strings.Contains(uif.Url, ei.Host) {
-			continue
-		}
-		if filterStaticPendUrl(uif.Url) {
-			// 静态资源不会去打开js
-			continue
-		} // 泛化后不重复才会请求
+		default:
+			uif, ok := <-UrlsQueue
+			if !ok {
+				return
+			}
+			if uif.Url == "" {
+				continue
+			}
+			// pass 掉host之外的域名
+			if strings.Contains(uif.Url, "http") && !strings.Contains(uif.Url, ei.Host) {
+				continue
+			}
+			if filterStaticPendUrl(uif.Url) {
+				// 静态资源不会去打开js
+				continue
+			} // 泛化后不重复才会请求
 
-		if !urlIsExists(uif.Url) {
-			PushTabQueue(uif)
+			if !urlIsExists(uif.Url) {
+				PushTabQueue(uif)
+			}
 		}
+
 	}
 }
 

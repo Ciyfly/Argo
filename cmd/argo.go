@@ -253,11 +253,7 @@ func RunMain(c *cli.Context) error {
 			log.Logger.Errorf("The target is inaccessible %s", t)
 			continue
 		}
-		eif := engine.InitEngine(t)
-		if eif != nil {
-			eif.Start()
-		}
-
+		engine.Run(t)
 	}
 	return nil
 }

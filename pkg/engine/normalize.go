@@ -58,8 +58,7 @@ func normalizeWork(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		default:
-			data, ok := <-PendingNormalizeQueue
+		case data, ok := <-PendingNormalizeQueue:
 			if !ok {
 				NormalizeCloseChan <- 0
 				return

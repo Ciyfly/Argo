@@ -9,6 +9,7 @@ import (
 	"argo/pkg/static"
 	"argo/pkg/utils"
 	"argo/pkg/vector"
+	"context"
 	"strings"
 	"sync"
 	"time"
@@ -195,14 +196,14 @@ var UrlsQueueCloseFlag bool
 var TabQueue chan *UrlInfo
 var PendUrlQueue chan *UrlInfo
 
-func (ei *EngineInfo) InitTabPool() {
+func (ei *EngineInfo) InitTabPool(ctx context.Context) {
 	UrlsQueue = make(chan *UrlInfo, 10000)
 	TabQueue = make(chan *UrlInfo, conf.GlobalConfig.BrowserConf.TabCount)
 	TabLimit = make(chan int, conf.GlobalConfig.BrowserConf.TabCount)
 	for i := 1; i < conf.GlobalConfig.BrowserConf.TabCount; i++ {
-		go ei.PendUrlWork()
+		go ei.PendUrlWork(ctx)
 	}
-	go ei.TabWork()
+	go ei.TabWork(ctx)
 }
 
 func CloseUrlQueue() {
@@ -221,43 +222,48 @@ func PushTabQueue(uif *UrlInfo) {
 	TabQueue <- uif
 }
 
-func (ei *EngineInfo) TabWork() {
+func (ei *EngineInfo) TabWork(ctx context.Context) {
 	for {
 		select {
-		case <-ei.Ctx.Done():
+		case <-ctx.Done():
 			return
 		case TabLimit <- 1:
 			// 从队列中获取一个 URL 对象并创建新协程去处理它
-			uif, ok := <-TabQueue
-			if !ok {
+			select {
+			case <-ctx.Done():
+				log.Logger.Info("-------------close TabWork ctx------------------")
 				return
-			}
-			// 不包含根url的直接不进行访问
-			if !strings.Contains(uif.Url, ei.Host) {
-				<-TabLimit
-				continue
-			}
-			if uif.Depth > conf.GlobalConfig.BrowserConf.MaxDepth {
-				log.Logger.Debugf("[ Max Depth] => %s depth: %d", uif.Url, uif.Depth)
-				// 将当前并发数减 1
-				<-TabLimit
-				continue
-			}
-			TabWg.Add(1)
-			go func() {
-				defer func() {
-					// 当前tab done 继续推送url
-					TabWg.Done()
-					<-TabLimit
-
-				}()
-				log.Logger.Debugf("[ new tab  ]=> %s", uif.Url)
-				if uif.SourceType == "homePage" {
-					ei.NewTab(uif, HOME_PAGE_FLAG)
-				} else {
-					ei.NewTab(uif, NOT_HOME_PAGE_FLAG)
+			case uif, ok := <-TabQueue:
+				if !ok {
+					return
 				}
-			}()
+				// 不包含根url的直接不进行访问
+				if !strings.Contains(uif.Url, ei.Host) {
+					<-TabLimit
+					continue
+				}
+				if uif.Depth > conf.GlobalConfig.BrowserConf.MaxDepth {
+					log.Logger.Debugf("[ Max Depth] => %s depth: %d", uif.Url, uif.Depth)
+					// 将当前并发数减 1
+					<-TabLimit
+					continue
+				}
+				TabWg.Add(1)
+				go func() {
+					defer func() {
+						// 当前tab done 继续推送url
+						TabWg.Done()
+						<-TabLimit
+
+					}()
+					log.Logger.Debugf("[ new tab  ]=> %s", uif.Url)
+					if uif.SourceType == "homePage" {
+						ei.NewTab(uif, HOME_PAGE_FLAG)
+					} else {
+						ei.NewTab(uif, NOT_HOME_PAGE_FLAG)
+					}
+				}()
+			}
 		default:
 			log.Logger.Debug("wait sleep 1s")
 			time.Sleep(1 * time.Second)
@@ -266,13 +272,12 @@ func (ei *EngineInfo) TabWork() {
 	}
 }
 
-func (ei *EngineInfo) PendUrlWork() {
+func (ei *EngineInfo) PendUrlWork(ctx context.Context) {
 	for {
 		select {
-		case <-ei.Ctx.Done():
+		case <-ctx.Done():
 			return
-		default:
-			uif, ok := <-UrlsQueue
+		case uif, ok := <-UrlsQueue:
 			if !ok {
 				return
 			}

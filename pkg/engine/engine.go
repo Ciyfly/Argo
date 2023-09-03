@@ -61,8 +61,19 @@ type UrlInfo struct {
 	Depth      int
 }
 
-func InitEngine(target string) *EngineInfo {
-	ctx, cacel := context.WithCancel(context.Background())
+func Run(target string) {
+	ctx, cancel := context.WithCancel(context.Background())
+	eif := InitEngine(ctx, target)
+	if eif != nil {
+		eif.Start(ctx)
+	} else {
+		cancel()
+		return
+	}
+	cancel()
+	ClearChan()
+}
+func InitEngine(ctx context.Context, target string) *EngineInfo {
 	// 初始化 js注入插件
 	inject.LoadScript()
 	// 初始化 登录插件
@@ -75,9 +86,8 @@ func InitEngine(target string) *EngineInfo {
 	InitFilter()
 	// 初始化浏览器
 	engineInfo := InitBrowser(target)
-	engineInfo.Ctx, engineInfo.Cancel = ctx, cacel
 	// 初始化tab控制携程池
-	engineInfo.InitTabPool()
+	engineInfo.InitTabPool(ctx)
 	return engineInfo
 }
 
@@ -186,12 +196,9 @@ func (ei *EngineInfo) Finish() {
 		log.Logger.Warnf("------------------------browser timeout, close browser %ds", conf.GlobalConfig.BrowserConf.BrowserTimeout)
 	}
 	ei.CloseBrowser()
-	ei.Cancel()
-	ClearChan()
-
 }
 
-func (ei *EngineInfo) Start() {
+func (ei *EngineInfo) Start(ctx context.Context) {
 	var reqClient *http.Client
 	if conf.GlobalConfig.BrowserConf.Proxy != "" {
 		log.Logger.Debugf("proxy: %s", conf.GlobalConfig.BrowserConf.Proxy)

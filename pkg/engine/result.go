@@ -52,8 +52,7 @@ func resultHandlerWork(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		default:
-			data, ok := <-ResultQueue
+		case data, ok := <-ResultQueue:
 			if !ok {
 				return
 			}

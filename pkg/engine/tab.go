@@ -16,6 +16,7 @@ import (
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
+	"github.com/panjf2000/ants/v2"
 )
 
 // tab 协程组
@@ -33,13 +34,13 @@ func (ei *EngineInfo) closeTab(page *rod.Page, pageFlag int, timeoutFlage int, t
 	if page != nil {
 		e := page.Close()
 		if e != nil {
-			log.Logger.Errorf("page close error: %s ", e.Error())
+			log.Logger.Debug("page close error: %s ", e.Error())
 		}
 	}
 	log.Logger.Debugf("TabLimit  2: %d", len(TabLimit))
-	if timeoutFlage == NOT_PAGE_TIME_FLAG {
-		tabDone <- true
-	}
+	// if timeoutFlage == NOT_PAGE_TIME_FLAG {
+	// 	tabDone <- true
+	// }
 	if pageFlag == HOME_PAGE_FLAG {
 		ei.FirstPageCloseChan <- true
 	}
@@ -63,6 +64,13 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 		return
 	}
 	var PushUrlWg sync.WaitGroup
+	// 初始化携程池
+	tabPool, _ := ants.NewPoolWithFunc(100, func(data interface{}) {
+		urlInfo := data.(*UrlInfo)
+		PushUrlQueue(urlInfo)
+		PushUrlWg.Done()
+	})
+	defer tabPool.Release()
 	go func() {
 		// 创建tab
 		page, pageError = ei.Browser.Page(proto.TargetCreateTarget{URL: uif.Url})
@@ -126,16 +134,15 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 		login.GlobalLoginAutoData.Handler(page)
 		// 注入js dom构建后
 		inject.InjectScript(page, 1)
+
 		// 静态解析下dom 爬取一些url
 		staticUrlList := static.ParseDom(page)
 		log.Logger.Debugf("static %s parse count: %d", uif.Url, len(staticUrlList))
 		if staticUrlList != nil {
 			for _, staticUrl := range staticUrlList {
 				PushUrlWg.Add(1)
-				go func(staticUrl string) {
-					defer PushUrlWg.Done()
-					PushUrlQueue(&UrlInfo{Url: staticUrl, SourceType: "static parse", SourceUrl: uif.Url, Depth: uif.Depth + 1})
-				}(staticUrl)
+				data := &UrlInfo{Url: staticUrl, SourceType: "static parse", SourceUrl: uif.Url, Depth: uif.Depth + 1}
+				_ = tabPool.Invoke(data)
 			}
 		}
 		// 执行自动化触发事件 输入 点击等 auto
@@ -154,33 +161,29 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 		// 解析demo
 		for _, staticUrl := range hrefList {
 			PushUrlWg.Add(1)
-			go func(staticUrl string) {
-				defer PushUrlWg.Done()
-				PushUrlQueue(&UrlInfo{Url: staticUrl, SourceType: "auto js", SourceUrl: uif.Url, Depth: uif.Depth + 1})
-			}(staticUrl)
+			data := &UrlInfo{Url: staticUrl, SourceType: "auto js", SourceUrl: uif.Url, Depth: uif.Depth + 1}
+			_ = tabPool.Invoke(data)
 		}
 
 		// 推送下如果 单纯的去修改当前页面url的形式
 		// https://spa5.scrape.center/page/1
 		if currentUrl != "" {
 			PushUrlWg.Add(1)
-			go func(currentUrl string) {
-				defer PushUrlWg.Done()
-				PushUrlQueue(&UrlInfo{Url: info.URL, SourceType: "patch", SourceUrl: uif.Url, Depth: uif.Depth + 1})
-			}(currentUrl)
+			data := &UrlInfo{Url: info.URL, SourceType: "patch", SourceUrl: uif.Url, Depth: uif.Depth + 1}
+			_ = tabPool.Invoke(data)
 		}
 		// 所有url提交完成才能结束
 		PushUrlWg.Wait()
-		NormalDoneFlag = true
-		if !TimeoutDoneFlag {
-			ei.NormalCloseTab(page, pageFlag, tabDone)
-		}
-
+		tabDone <- true
 	}() // 协程
 	// 阻塞超时控制
 	select {
 	case <-tabDone:
 		log.Logger.Debugf("[close tab ] => %s", uif.Url)
+		NormalDoneFlag = true
+		if !TimeoutDoneFlag {
+			ei.NormalCloseTab(page, pageFlag, tabDone)
+		}
 	case <-time.After(time.Duration(conf.GlobalConfig.BrowserConf.TabTimeout) * time.Second):
 		log.Logger.Warnf("[timeout tab ] => %s", uif.Url)
 		if !NormalDoneFlag {

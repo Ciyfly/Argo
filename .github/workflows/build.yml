@@ -4,16 +4,19 @@ on:
     tags:
       - v*
   workflow_dispatch:
-jobs:
 
+jobs:
   build:
     name: Build
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os:
-          - ubuntu-latest
-          - macos-latest
+          - ubuntu-latest-arm64
+          - ubuntu-latest-amd64
+          - macos-latest-arm64
+          - macos-latest-amd64
+          - windows-latest-amd64
     steps:
       - name: Set up Go 1.19
         uses: actions/setup-go@v1
@@ -31,35 +34,34 @@ jobs:
       - name: Get dependencies
         run: go mod download
 
-      - name: Build On Linux
+      - name: Build
         run: |
-          go build -ldflags "-X main.Version=${{ steps.get_version.outputs.VERSION }}" -o ./argo ./cmd/argo.go
-          chmod +x argo
-          ls | grep argo
-          tar -cvf Argo-${{ steps.get_version.outputs.VERSION }}-linux.tar argo
-        if: matrix.os == 'ubuntu-latest'
-        env:
-          GOENABLE: 1
-      - name: Build On Darwin
-        run: |
-          go build -ldflags "-X main.Version=${{ steps.get_version.outputs.VERSION }}" -o ./argo ./cmd/argo.go
-          chmod +x argo
-          tar -cvf Argo-${{ steps.get_version.outputs.VERSION }}-darwin.tar argo
-        if: matrix.os == 'macos-latest'
-      - name: Build On Windows
-        run: |
-          go build -ldflags "-X main.Version=${{ steps.get_version.outputs.VERSION }}" -o ./argo.exe ./cmd/argo.go
-          tar -cvf Argo-${{ steps.get_version.outputs.VERSION }}-windows.tar argo.exe
-        if: matrix.os == 'ubuntu-latest'
-        env:
-          GOOS: windows
-          GOENABLE: 1
+          if [ "${{ matrix.os }}" = "ubuntu-latest-arm64" ]; then
+            go build -ldflags "-X main.Version=${{ steps.get_version.outputs.VERSION }}" -o ./argo-arm64 ./cmd/argo.go
+            chmod +x argo-arm64
+            tar -czvf Argo-${{ steps.get_version.outputs.VERSION }}-arm64.tgz argo-arm64
+          elif [ "${{ matrix.os }}" = "ubuntu-latest-amd64" ]; then
+            go build -ldflags "-X main.Version=${{ steps.get_version.outputs.VERSION }}" -o ./argo-amd64 ./cmd/argo.go
+            chmod +x argo-amd64
+            tar -czvf Argo-${{ steps.get_version.outputs.VERSION }}-amd64.tgz argo-amd64
+          elif [ "${{ matrix.os }}" = "macos-latest-arm64" ]; then
+            go build -ldflags "-X main.Version=${{ steps.get_version.outputs.VERSION }}" -o ./argo-arm64 ./cmd/argo.go
+            chmod +x argo-arm64
+            tar -czvf Argo-${{ steps.get_version.outputs.VERSION }}-arm64.tgz argo-arm64
+          elif [ "${{ matrix.os }}" = "macos-latest-amd64" ]; then
+            go build -ldflags "-X main.Version=${{ steps.get_version.outputs.VERSION }}" -o ./argo-amd64 ./cmd/argo.go
+            chmod +x argo-amd64
+            tar -czvf Argo-${{ steps.get_version.outputs.VERSION }}-amd64.tgz argo-amd64
+          elif [ "${{ matrix.os }}" = "windows-latest-amd64" ]; then
+            go build -ldflags "-X main.Version=${{ steps.get_version.outputs.VERSION }}" -o ./argo-amd64.exe ./cmd/argo.go
+            tar -czvf Argo-${{ steps.get_version.outputs.VERSION }}-amd64.tgz argo-amd64.exe
+          fi
+
       - name: Release
         uses: softprops/action-gh-release@master
         with:
-          # note you'll typically need to create a personal access token
-          # with permissions to create releases in the other repo
-          files: Argo-*
+          files: |
+            Argo-*.tgz
           fail_on_unmatched_files: true
           token: ${{ secrets.TOKEN }}
           append_body: true

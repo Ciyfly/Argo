@@ -1,9 +1,9 @@
 name: 🎉 Build Binary
+
 on:
-  create:
-    tags:
-      - v*
-  workflow_dispatch:
+  release:
+    types: [created,published]
+
 jobs:
   build-go-binary:
     runs-on: ubuntu-latest
@@ -23,4 +23,6 @@ jobs:
           goarch: ${{ matrix.goarch }}
           goversion: 1.19 
           binary_name: "argo"
+          build_command: "go build cmd/argo.go "
+          build_flags: "-X main.Version=${{ steps.get_version.outputs.VERSION }}"
           extra_files: README.md

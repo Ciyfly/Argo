@@ -1,7 +1,7 @@
 name: 🎉 Build Binary
 
 on:
-  create:
+  push:
     tags:
       - v*
 

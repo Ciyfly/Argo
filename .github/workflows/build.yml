@@ -1,10 +1,8 @@
 name: 🎉 Build Binary
 
 on:
-  create:
-    tags:
-      - v*
-  workflow_dispatch:
+  release:
+    types: [created]
 jobs:
   build-go-binary:
     runs-on: ubuntu-latest

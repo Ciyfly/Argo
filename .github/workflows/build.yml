@@ -24,6 +24,6 @@ jobs:
           goarch: ${{ matrix.goarch }}
           goversion: 1.19
           binary_name: "argo"
-          project_path: "./cmd/argo.go "
+          project_path: "./cmd/"
           build_flags: "-X main.Version=${{ steps.get_version.outputs.VERSION }}"
           extra_files: README.md

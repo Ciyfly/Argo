@@ -16,6 +16,16 @@ jobs:
           - goarch: arm64
             goos: windows
     steps:
+      - name: Get Release Info
+        run: |
+          {
+            echo "RELEASE_TAG=${GITHUB_REF/refs\/tags\//}"
+            echo "REPOSITORY_NAME=${GITHUB_REPOSITORY#*/}"
+            echo "OS_NAME=${{ matrix.goos }}"
+          } >> "$GITHUB_ENV"
+      - name: OS darwin
+        if: matrix.goos == 'darwin'
+        run: echo "OS_NAME=macOS" >> "$GITHUB_ENV"          
       - uses: actions/checkout@v3
       - uses: wangyoucao577/go-release-action@v1.40
         with:
@@ -25,5 +35,5 @@ jobs:
           goversion: 1.19
           binary_name: "argo"
           project_path: "./cmd/"
-          build_flags: "-X main.Version=${{ steps.get_version.outputs.VERSION }}"
-          extra_files: README.md
+          ldflags: "-X main.Version=${{ env.RELEASE_TAG }}"
+          asset_name: '${{ env.REPOSITORY_NAME }}-${{ env.RELEASE_TAG }}-${{ env.OS_NAME }}-${{ matrix.goarch }}'

@@ -257,6 +257,9 @@ apt-get install -yq --no-install-recommends libasound2 libatk1.0-0 libc6 libcair
 
 ![](imgs/Argo交流群.jpg)
 
+欢迎关注公众号
+![](https://user-images.githubusercontent.com/16779256/262313682-b324004a-5b4a-483e-9fc0-145b6706955e.png)
+
 
 
 ## 声明

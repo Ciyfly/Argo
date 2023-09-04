@@ -17,11 +17,12 @@ jobs:
             goos: windows
     steps:
       - uses: actions/checkout@v3
-      - uses: wangyoucao577/go-release-action@v1.30
+      - uses: wangyoucao577/go-release-action@v1.40
         with:
           github_token: ${{ secrets.TOKEN }}
           goos: ${{ matrix.goos }}
           goarch: ${{ matrix.goarch }}
+          goversion: 1.19
           binary_name: "argo"
           build_command: "go build cmd/argo.go "
           build_flags: "-X main.Version=${{ steps.get_version.outputs.VERSION }}"

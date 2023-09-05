@@ -16,7 +16,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -113,6 +112,16 @@ func InitBrowser(target string) *EngineInfo {
 	options.Set("disable-web-security")
 	options.Set("allow-running-insecure-content")
 	options.Set("reduce-security-for-testing")
+	options.Set("no-gpu")
+	options.Set("--no-first-run")
+	options.Set("ignore-certifcate-errors")
+	options.Set("disable-xss-auditor")
+	options.Set("disable-popup-blocking")
+	options.Set("mute-audio", "true")
+	options.Set("use-mock-keychain")
+	options.Set("--disable-permissions-api")
+	options.Set("--remote-allow-origins")
+	options.Set("--disable-dev-shm-usage")
 	if conf.GlobalConfig.BrowserConf.UnHeadless || conf.GlobalConfig.Dev {
 		options = options.Delete("--headless")
 		browser = browser.SlowMotion(time.Duration(conf.GlobalConfig.AutoConf.Slow) * time.Second)
@@ -124,11 +133,6 @@ func InitBrowser(target string) *EngineInfo {
 		}
 		options.Proxy(proxyURL.String())
 	}
-	// windows下 使用单进程 防止多个cmd窗口弹出
-	if runtime.GOOS == "windows" {
-		options = options.Set("single-process")
-	}
-	options.Set("", "about:blank")
 	if conf.GlobalConfig.BrowserConf.Remote != "" {
 		log.Logger.Infof("chrome remote: %s", conf.GlobalConfig.BrowserConf.Remote)
 		browser = browser.ControlURL(conf.GlobalConfig.BrowserConf.Remote)

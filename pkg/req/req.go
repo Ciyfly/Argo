@@ -23,7 +23,6 @@ func getHttpClient(target, method string) (*http.Client, *http.Request) {
 	request.Header.Set("User-Agent", WebUserAgent())
 	transport := &http.Transport{
 		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
-		IdleConnTimeout:     3 * time.Second,
 		MaxConnsPerHost:     5,
 		MaxIdleConns:        0,
 		MaxIdleConnsPerHost: 10,
@@ -34,13 +33,13 @@ func getHttpClient(target, method string) (*http.Client, *http.Request) {
 	}
 	client := &http.Client{
 		Transport: transport,
-		Timeout:   time.Second * 3, // 超时时间
+		Timeout:   time.Second * 10, // 超时时间
 	}
 	return client, request
 }
 
 func CheckTarget(target string) bool {
-	client, request := getHttpClient(target, "HEAD")
+	client, request := getHttpClient(target, "GET")
 	resp, err := client.Do(request)
 	if err != nil {
 		log.Logger.Debugf("req error: %s", err)

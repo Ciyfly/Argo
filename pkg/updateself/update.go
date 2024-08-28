@@ -7,7 +7,7 @@
 package updateself
 
 import (
-	"archive/tar"
+	"argo/pkg/utils"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -60,7 +60,7 @@ func getLastVersion() (LastVersionInfo, error) {
 	return lvi, nil
 }
 
-func downloadLastVersion(lastVersion, url string) error {
+func downloadLastVersion(lastVersion, url, name string) error {
 	resp, err := http.Get(url)
 	if err != nil {
 		fmt.Printf("download last version: %s err: %s\n", lastVersion, err)
@@ -68,7 +68,7 @@ func downloadLastVersion(lastVersion, url string) error {
 	}
 	defer resp.Body.Close()
 
-	file, err := os.Create("new_Argo.tar")
+	file, err := os.Create(name)
 	if err != nil {
 		fmt.Printf("download last version: %s err: %s\n", lastVersion, err)
 		return err
@@ -135,35 +135,20 @@ func downloadLastVersion(lastVersion, url string) error {
 	return nil
 }
 
-func decompress() {
-	file, err := os.Open("new_Argo.tar")
-	if err != nil {
-		fmt.Printf("decompress last version err: %s\n", err)
+func get_assest_name() string {
+	// Argo-v1.2.13-linux-amd64.tar.gz
+	var os, arrch string
+	if runtime.GOOS == "darwin" {
+		os = "macOS"
+	} else {
+		os = runtime.GOOS
 	}
-	defer file.Close()
-	reader := tar.NewReader(file)
-	for {
-		header, err := reader.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			fmt.Printf("decompress last version err: %s\n", err)
-		}
-		if header.Typeflag != tar.TypeReg {
-			continue
-		}
-		targetFile, err := os.Create(header.Name)
-		if err != nil {
-			fmt.Printf("decompress last version err: %s\n", err)
-		}
-		defer targetFile.Close()
-		_, err = io.Copy(targetFile, reader)
-		if err != nil {
-			fmt.Printf("decompress last version err: %s\n", err)
-		}
-		fmt.Printf("decompress %s over\n", header.Name)
+	if runtime.GOARCH == "arm" {
+		arrch = "arm64"
+	} else {
+		arrch = runtime.GOARCH
 	}
+	return os + "-" + arrch
 }
 
 func CheckIfUpgradeRequired(version string) {
@@ -178,15 +163,17 @@ func CheckIfUpgradeRequired(version string) {
 		fmt.Println("------------------------------")
 		fmt.Print(lvi.Body)
 		fmt.Println("\n------------------------------")
-		var downloadUrl string
+		var downloadUrl, name string
+		goOsArrch := get_assest_name()
 		for _, assest := range lvi.Assets {
-			if strings.Contains(assest.Name, runtime.GOOS) {
+			if strings.Contains(assest.Name, goOsArrch) {
 				downloadUrl = assest.BrowserDownloadURL
+				name = assest.Name
 				break
 			}
 		}
 		fmt.Printf("download url: %s\n", downloadUrl)
-		err := downloadLastVersion(lvi.TagName, downloadUrl)
+		err := downloadLastVersion(lvi.TagName, downloadUrl, name)
 		if err != nil {
 			return
 		}
@@ -202,9 +189,12 @@ func CheckIfUpgradeRequired(version string) {
 			return
 		}
 		fmt.Println("decompress new version")
-		decompress()
+		errUncompress := utils.Uncompress(name)
+		if errUncompress != nil {
+			fmt.Println(err)
+		}
 		fmt.Println("remove download file")
-		err = os.Remove("new_Argo.tar")
+		err = os.Remove(name)
 		if err != nil {
 			fmt.Printf("del download err: %s \n", err)
 		}

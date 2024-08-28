@@ -139,7 +139,7 @@ func main() {
 		},
 		&cli.IntFlag{
 			Name:     "tabtimeout",
-			Value:    12,
+			Value:    15,
 			Usage:    "Set max tab run time, close if limit exceeded. Unit is seconds.",
 			Category: ConfigArgsGroup,
 		},

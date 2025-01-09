@@ -20,7 +20,9 @@
 10. 支持控制是否存储完整请求响应base64字符串 json格式
 11. 支持程序自动升级 
 12. 支持 指定 远程浏览器 本地浏览器
+13. 更新了 增加多个目标爬取后指定生成到一个文件 增加指定UA
 
+注意: 我开放了很多参数 几个参数配合使用可以达到自己想要的效果
 
 ## 安装
 
@@ -144,7 +146,22 @@ http://192.168.192.128:8080/
 # run argo
 ./argo -f targets.txt  --format txt
 ```
+### 多个目标结果存到一个文件里
+```
+# 指定格式的合并输出
+./argo -f targets.txt --mergedOutput results.txt    # 只输出txt格式
+./argo -f targets.txt --mergedOutput results.json   # 只输出json格式
 
+# 多格式输出
+./argo -f targets.txt --mergedOutput results --format txt,json,xlsx  # 输出多个格式文件
+## 这种方式 如果文件名没变 多次执行 都会追加到一个文件里
+
+```
+
+### 指定UA
+```
+argo  -t http://testphp.vulnweb.com/  --userAgent recar123
+```
 
 ### 指定浏览器
 

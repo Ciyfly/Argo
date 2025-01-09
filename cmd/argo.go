@@ -177,6 +177,11 @@ func main() {
 			Usage:    "save output to directory",
 			Category: OutPutArgsGroup,
 		},
+		&cli.StringFlag{
+			Name:     "mergedOutput",
+			Usage:    "Specify a file path to merge all targets' results into a single output file",
+			Category: OutPutArgsGroup,
+		},
 		&cli.BoolFlag{
 			Name:     "quiet",
 			Usage:    "Enable quiet mode to output only the URL information that has been retrieved, in JSON format",

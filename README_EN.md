@@ -1,25 +1,33 @@
 # Argo
 
-[中文 ](./README.md) | English 
+<div align=center><img width="250" height="250" src="imgs/logo.jpg"/></div>
 
-The automated general crawler based on go-rod is used to automatically obtain the URL of the website. It must also be implemented based on a headless browser.
+[中文](./README.md) | English
 
-## Function
-Support is as follows
-1. Intelligently trigger page events. For example, if there is a new dom after clicking, it will be processed first
-2. Smart login website does not support the case of verification code
-3. Support hook full traffic Get all browser traffic output requests and response content through go-rod's HijackRequests
-4. Deduplicate the URL, and the final output is stored after deduplication
-5. Support multi-format result output txt, json, xlsx, html
-6. Support playback of scripts in yaml format, and operations will be performed in sequence
-7. Support to open the browser interface and support debug output
-8. Support agents
+A general-purpose automated crawler based on go-rod for automatically obtaining website URLs, implemented using headless browser technology.
 
+## Features
+Supports the following:
+1. Intelligent triggering of page events - prioritizes processing of new DOM elements after clicks
+2. Intelligent website login (currently does not support scenarios with CAPTCHAs)
+3. Full traffic hook support - captures all browser traffic (requests and responses) through go-rod's HijackRequests
+4. URL deduplication - final stored output contains only unique URLs
+5. Multiple output formats supported - txt, json, xlsx, html
+6. Supports playback of yaml format scripts - executes operations in sequence
+7. Supports browser interface display and debug output
+8. Proxy support
+9. URL depth control
+10. Option to store complete request-response base64 strings in JSON format
+11. Automatic program upgrade support
+12. Support for specifying remote or local browser
+13. Updated to support multiple target crawling with single file output and custom UA specification
 
-## Install
+Note: I've exposed many parameters that can be combined to achieve desired effects
 
-You can download the latest version directly from here https://github.com/Ciyfly/Argo/releases
-No need to manually download chrome, run the program directly and it will automatically download chrome
+## Installation
+
+You can download the latest version directly from https://github.com/Ciyfly/Argo/releases
+No need to manually download Chrome - running the program will automatically download Chrome
 
 ```yaml
 ./argo -h
@@ -46,33 +54,37 @@ GLOBAL OPTIONS:
    Browser
 
    --slow value  The default delay time for operating after enabling  (default: 1000)
-   --trace       Whether to display the elements of operation after opening the interface (default: false)
+   --trace       Display operation elements after interface opens? (default: false)
 
    Config
 
-   --browsertimeout value      Set the maximum running time for the browser, and close the browser if it exceeds the limit. The unit is in seconds (default: 18000)
-   --maxdepth value            Scrape the web content with increasing depth by crawling each URL based on the last one, and incrementing the current depth by 1 relative to the previous depth. Stop crawling once the maximum depth is reached. (default: 10)
+   --browsertimeout value      Set max browser run time, close if limit exceeded. Unit is seconds. (default: 900)
+   --chrome value              Specify the Chrome executable path, e.g. --chrome /opt/google/chrome/chrome
+   --maxdepth value            Scrape web content with increasing depth by crawling URLs, stop at max depth. (default: 5)
+   --remote value              Specify remote Chrome address, e.g. --remote http://127.0.0.1:3000
    --tabcount value, -c value  The maximum number of tab pages that can be opened (default: 10)
-   --tabtimeout value          Set the maximum running time for the tab, and close the tab if it exceeds the limit. The unit is in seconds (default: 30)
+   --tabtimeout value          Set max tab run time, close if limit exceeded. Unit is seconds. (default: 15)
 
    Data
 
-   --email value               If logging in, the default email (default: "argo@recar.com")
-   --password value, -p value  If logging in, the default password (default: "argo123")
-   --phone value               If logging in, the default phone (default: "18888888888")
-   --username value, -u value  If logging in, the default username  (default: "argo")
+   --email value               Default email if logging in. (default: "argo@recar.com")
+   --password value, -p value  Default password if logging in. (default: "argo123")
+   --phone value               Default phone if logging in. (default: "18888888888")
+   --username value, -u value  Default username if logging in. (default: "argo")
 
    Debug
 
-   --debug             Do you want to output debug information? (default: false)
-   --dev               Enable dev mode. This will activate the browser interface mode and stop after accessing the page for development and debugging purposes (default: false)
-   --testplayback      If opened, then directly end after executing the specified playback script (default: false)
-   --unheadless, --uh  Is the default interface disabled? Specify 'uh' to enable the interface (default: false)
+   --debug             Output debug info? (default: false)
+   --dev               Enable dev mode, activates browser interface and stops after page access for dev purposes. (default: false)
+   --testplayback      irectly end if open, after specified playback script execution. (default: false)
+   --unheadless, --uh  Default interface disabled? Use 'uh' to enable it. (default: false)
 
    OutPut
 
-   --format value  Result output format separated by commas, multiple formats can be output at one time, and the supported formats include txt, json, xlsx, and html (default: "txt,json")
-   --save value    The default name for the saved result is 'target' without a file extension. For example, to save as 'test', use the command '--save test'
+   --format value     Output format separated by commas, txt, json, xlsx, html supported. (default: "txt,json")
+   --outputdir value  save output to directory
+   --quiet            Enable quiet mode to output only the URL information that has been retrieved, in JSON format (default: false)
+   --save value       Result saved as 'target' by default. Use '--save test' to save as 'test'.
 
    Update
 
@@ -80,18 +92,16 @@ GLOBAL OPTIONS:
 
    Use
 
-   --norrs                        There is no storage request response string, which can save memory and is suitable for a large number of scans (default: true)
+   --norrs                        No storage of req-res strings, saves memory, suitable for large scans. (default: false)
    --playback value               Support replay like headless YAML scripts
    --proxy value                  Set up a proxy, for example, http://127.0.0.1:3128
    --target value, -t value       Specify the entry point for testing
-   --targetsfile value, -f value  The specified target file list has each target separated by a new line, just like other tools we have used in the past
-
-
+   --targetsfile value, -f value  The file list has targets separated by new lines, like other tools we've used before.
 ```
 
-## run
+## Usage
 
-### test http://testphp.vulnweb.com/
+### Testing http://testphp.vulnweb.com/
 
 ```shell
 ./argo -t http://testphp.vulnweb.com/ --format txt 
@@ -99,31 +109,31 @@ GLOBAL OPTIONS:
 
 ![](imgs/demo.gif)
 
-### test DVWA need to log in
+### Testing DVWA (requires login)
 
 ```shell
-./argo -t http://192.168.192.128:8080/ -u admin -p password
+./argo -t http://192.168.192.128:8080/ -u admin -p password --format txt
 ```
 
-### use proxy
+![](imgs/dvwa.gif)
+
+### Configuring Proxy
 
 ```shell
 ./argo -t http://testphp.vulnweb.com/ --format txt --proxy http://127.0.0.1:3128
 ./argo -t http://testphp.vulnweb.com/ --format txt --proxy http://username:password@127.0.0.1:3128
 ```
 
-
-### Use playback to realize dvwa login
+### Using playback for DVWA login
 
 ```shell
 ./argo -t http://192.168.192.128:8080/ --playback headless/dvwa.yml  --format txt
 ```
 
+### Using -f to specify target file (multiple targets)
 
-### Specify the target file through -f, that is, multiple targets
-
-Currently a single target is executed sequentially There is always one browser running
-If you need to log in, remember to add the username and password parameters. Currently only a single
+Currently executes targets sequentially with one browser running at a time.
+Remember to add username/password parameters if login is required (currently supports single credential set)
 
 ```shell
 cat targets.txt
@@ -131,55 +141,103 @@ http://testphp.vulnweb.com/
 http://192.168.192.128:8080/
 
 # run argo
-./argo -f targets.txt --format txt
+./argo -f targets.txt  --format txt
 ```
 
+### Merging multiple target results into one file
+```shell
+# Specify format for merged output
+./argo -f targets.txt --mergedOutput results.txt    # txt format only
+./argo -f targets.txt --mergedOutput results.json   # json format only
 
-### Support control event trigger interval --slow
-The default is 1000ms, that is, 1s event. If input is clicked, it will wait for the interval time before continuing to trigger
+# Multiple format output
+./argo -f targets.txt --mergedOutput results --format txt,json,xlsx  # outputs multiple format files
+## Note: Results will be appended to existing files if the filename remains the same across multiple executions
+```
+
+### Specifying User Agent
+```shell
+argo  -t http://testphp.vulnweb.com/  --userAgent recar123
+```
+
+### Specifying Browser
+
+Two parameters added: one for specifying local downloaded browser, another for remote browser
+
+Remote browser can use https://github.com/browserless/chrome
+Run container, listen to port, and configure argo accordingly
+
+```shell
+# Specify local browser path
+./argo -t http://192.168.192.128:8080/ --chrome chrome_path
+
+# Specify remote browser IP and port
+./argo -t http://192.168.192.128:8080/ --remote http://127.0.0.1:3000
+```
+
+### Setting Browser and Page Timeout
+
+Default browser timeout is 900s
+
+### Control Event Trigger Interval --slow
+Default is 1000ms (1s). Events like input and clicks will wait for the interval before triggering again
 
 ```shell
 ./argo -t http://192.168.192.128:8080/  --slow 
 ```
 
-### View browser interface --uh
+### View Browser Interface --uh
 
-Specify the --uh parameter to run the program and it will display the browser interface that can be used for debugging. Correspondingly, the trace parameter can be enabled to follow the elements triggered by the event
+Use --uh parameter to display browser interface for debugging. Can enable trace parameter to follow event-triggered elements
 
 ```shell
 ./argo -t http://192.168.192.128:8080/  --uh
 ```
 
-### debug 
+### Control Request-Response Base64 String Storage
+Storing consumes memory and reduces performance
+```shell
+./argo -t http://192.168.192.128:8080/  --norrs
+```
+
+### URL Depth Control
+
+Default is 3, URLs beyond maximum depth are discarded
+```shell
+./argo -t http://192.168.192.128:8080/   --maxdepth depth_number
+```
+
+### Program Upgrade
+
+Compares version with GitHub and automatically downloads new version based on platform
+```shell
+./argo -t http://192.168.192.128:8080/  --update
+```
+
+### Debug Output
 
 ```shell
 ./argo -t http://192.168.192.128:8080/  --debug
 ```
 
-The debug output will output detailed generalization deduplication, parsing url and other information, as shown in the figure below
+Debug output shows detailed generalization, deduplication, URL parsing, etc.
 
 ![](imgs/debug.jpg)
 
-
-### Support multiple output formats
-For example, the html output results are as follows
+### Multiple Output Format Support
+HTML output example:
 
 ![](imgs/result_html.jpg)
 
-The excel table output results are as follows
+Excel output example:
 
 ![](imgs/result_excel.jpg)
 
+## Description
+This is an assignment from w8ay's knowledge planet and relates to my recent work. It was designed and implemented based on various experts' foundations. Any issues are welcome through issues or direct contact.
+The program still has many areas for improvement, and such programs require time and testing to refine. The next step is to test the program to approach automation capabilities and better support Web 2.0 websites.
 
-
-
-## explanation
-
-It is the homework of master w8ay knowledge planet, and it is also related to my recent work, so I made this program. It is designed and implemented on the basis of the masters. Of course, if you have any questions, please ask issus or contact me.
-At present, there are still many places in the program that can be improved. This program will definitely need time and testing to polish. The next step is to prepare the test program to approach what automation can complete, and the next step is to better support web2.0 websites
-
-
-## reference
+## References
 
 http://blog.fatezero.org/2018/04/09/web-scanner-crawler-02/  
 https://pkg.go.dev/github.com/go-rod/go-rod-chinese  
@@ -187,11 +245,29 @@ https://chat.openai.com/
 
 ## FAQ 
 
-If there is an anti-virus report when running, as shown in the picture, it says that there is a problem with leakless.exe, you can trust him. This is the source code used by go-rod to control the problems left over from the chrome process. https://github.com/ysmood/leakless Of course, you can also compile and replace it yourself
+If antivirus reports issues with leakless.exe, you can trust it - it's used by go-rod to control Chrome process residual issues. Source code is at https://github.com/ysmood/leakless, or you can compile and replace it yourself.
 ![](imgs/leakless.png)
 
-Argo's compiled program is automatically compiled by github action, of course you can compile it yourself
+Argo's compiled program is automatically built by GitHub action, but you can compile it yourself.
 
-## statement
+If first run errors with "error while loading shared libraries: libatk-1.0.so.0: cannot open shared object file: No such file or directory"
+Solution:
+```shell
+# centos
+yum install pango.x86_64 libXcomposite.x86_64 libXcursor.x86_64 libXdamage.x86_64 libXext.x86_64 libXi.x86_64 libXtst.x86_64 cups-libs.x86_64 libXScrnSaver.x86_64 libXrandr.x86_64 GConf2.x86_64 alsa-lib.x86_64 atk.x86_64 gtk3.x86_64 -y
 
-Please abide by local laws before using argo, argo is only provided for educational purposes.
+# ubuntu
+apt-get install -yq --no-install-recommends libasound2 libatk1.0-0 libc6 libcairo2 libcups2 libdbus-1-3 libexpat1 libfontconfig1 libgcc1 libgconf-2-4 libgdk-pixbuf2.0-0 libglib2.0-0 libgtk-3-0 libnspr4 libpango-1.0-0 libpangocairo-1.0-0 libstdc++6 libx11-6 libx11-xcb1 libxcb1 libxcursor1 libxdamage1 libxext6 libxfixes3 libxi6 libxrandr2 libxrender1 libxss1 libxtst6 libnss3 libgbm-dev
+```
+
+## Communication
+Join the group to discuss Argo-related issues
+
+![](imgs/Argo交流群.jpg)
+
+Welcome to follow the official account
+![](https://user-images.githubusercontent.com/16779256/262313682-b324004a-5b4a-483e-9fc0-145b6706955e.png)
+
+## Disclaimer
+
+Please comply with local laws when using Argo. Argo is provided for educational purposes only.

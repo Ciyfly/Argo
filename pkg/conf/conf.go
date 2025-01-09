@@ -53,9 +53,10 @@ type Conf struct {
 
 // 保存的格式
 type ResultConf struct {
-	OutputDir string
-	Format    string
-	Name      string
+	OutputDir    string
+	Format       string
+	Name         string
+	MergedOutput string
 }
 
 // 默认的用户名密码
@@ -152,7 +153,7 @@ func MergeArgs(c *cli.Context) {
 	save := c.String("save")
 	format := c.String("format")
 	outputDir := c.String("outputdir")
-
+	mergedOutput := c.String("mergedOutput")
 	//静默输出
 	quiet := c.Bool("quiet")
 	// debug dev
@@ -237,7 +238,7 @@ func MergeArgs(c *cli.Context) {
 	GlobalConfig.ResultConf.Name = save
 	GlobalConfig.ResultConf.Format = format
 	GlobalConfig.ResultConf.OutputDir = outputDir
-
+	GlobalConfig.ResultConf.MergedOutput = mergedOutput
 	//dev
 	GlobalConfig.Dev = devMode
 

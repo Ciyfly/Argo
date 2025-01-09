@@ -30,6 +30,7 @@ browser:
   tabtimeout: 15 # tab页面最长时间
   browsertimeout: 600 # 浏览器运行最长时间
   maxdepth: 3 # 爬行最大深度
+  user_agent: ""
 auto:
   slow: 1000 # 事件触发的延迟时间
   filter: ["lougout", "登出", "reset"] # 包含这种字符的就不进行触发事件
@@ -76,6 +77,7 @@ type BrowserConf struct {
 	MaxDepth       int    `yaml:"max_depth"`
 	Chrome         string `yaml:"chrome"`
 	Remote         string `yaml:"remote"`
+	UserAgent      string `yaml:"user_agent"`
 }
 
 // auto 自动触发的一些参数
@@ -142,6 +144,7 @@ func MergeArgs(c *cli.Context) {
 	browserTimeout := c.Int("browsertimeout")
 	chrome := c.String("chrome")
 	remote := c.String("remote")
+	userAgent := c.String("userAgent")
 	// 回放
 	playback := c.String("playback")
 	testPlayback := c.Bool("testplayback")
@@ -212,6 +215,9 @@ func MergeArgs(c *cli.Context) {
 	}
 	if remote != GlobalConfig.BrowserConf.Remote {
 		GlobalConfig.BrowserConf.Remote = remote
+	}
+	if userAgent != GlobalConfig.BrowserConf.UserAgent {
+		GlobalConfig.BrowserConf.UserAgent = userAgent
 	}
 	// 登录参数
 	if username != GlobalConfig.LoginConf.Username {

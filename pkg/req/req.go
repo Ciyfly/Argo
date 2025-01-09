@@ -31,6 +31,9 @@ func getHttpClient(target, method string) (*http.Client, *http.Request) {
 		proxy, _ := url.Parse(conf.GlobalConfig.BrowserConf.Proxy)
 		transport.Proxy = http.ProxyURL(proxy)
 	}
+	if conf.GlobalConfig.BrowserConf.UserAgent != "" {
+		request.Header.Set("User-Agent", conf.GlobalConfig.BrowserConf.UserAgent)
+	}
 	client := &http.Client{
 		Transport: transport,
 		Timeout:   time.Second * 10, // 超时时间

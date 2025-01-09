@@ -89,6 +89,12 @@ func main() {
 			Category: BrowserArgsGroup,
 		},
 		&cli.StringFlag{
+			Name:     "userAgent",
+			Value:    "",
+			Usage:    "User-Agent",
+			Category: BrowserArgsGroup,
+		},
+		&cli.StringFlag{
 			Name:     "username",
 			Aliases:  []string{"u"},
 			Value:    "argo",

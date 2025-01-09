@@ -128,6 +128,10 @@ func InitBrowser(target string) *EngineInfo {
 	if runtime.GOOS == "windows" {
 		options = options.Set("single-process")
 	}
+	// 如果指定了ua 设置ua
+	if conf.GlobalConfig.BrowserConf.UserAgent != "" {
+		options.Set("user-agent", conf.GlobalConfig.BrowserConf.UserAgent)
+	}
 	options.Set("", "about:blank")
 	if conf.GlobalConfig.BrowserConf.Remote != "" {
 		log.Logger.Infof("chrome remote: %s", conf.GlobalConfig.BrowserConf.Remote)
@@ -237,10 +241,15 @@ func (ei *EngineInfo) Start(ctx context.Context) {
 					saveBytes, _ = ioutil.ReadAll(save)
 				}
 				ctx.Request.Req().Body = body
+				// proxy
 				if conf.GlobalConfig.BrowserConf.Proxy != "" {
 					reqClient = req.GetProxyClient()
 				} else {
 					reqClient = http.DefaultClient
+				}
+				// ua
+				if conf.GlobalConfig.BrowserConf.UserAgent != "" {
+					ctx.Request.Req().Header.Set("User-Agent", conf.GlobalConfig.BrowserConf.UserAgent)
 				}
 				ctx.LoadResponse(reqClient, true)
 				// load 后才有响应相关

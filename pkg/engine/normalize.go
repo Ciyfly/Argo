@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // 泛化去重
@@ -24,6 +25,14 @@ type PendingUrl struct {
 	ResponseBody    string
 	RequestStr      string
 }
+
+const normalizeCacheLimit = 500000
+
+var (
+	uuidRegex = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+	hexRegex  = regexp.MustCompile(`(?i)^[0-9a-f]+$`)
+	dateRegex = regexp.MustCompile(`^\d{4}-\d{1,2}-\d{1,2}$`)
+)
 
 func (ei *EngineInfo) InitNormalize() {
 	ei.PendingNormalizeQueue = make(chan *PendingUrl, 100)
@@ -61,6 +70,10 @@ func (ei *EngineInfo) normalizeWork() {
 			value := normalizeation(urlStr, data.Method)
 			if _, ok := ei.NormalizeationResultMap[value]; !ok {
 				ei.NormalizeationResultMap[value] = 0
+				if len(ei.NormalizeationResultMap) > normalizeCacheLimit {
+					log.Logger.Warnf("normalize cache limit reached, clearing")
+					ei.NormalizeationResultMap = make(map[string]int)
+				}
 				ei.pushResult(data)
 			}
 		}
@@ -74,61 +87,120 @@ func isNumber(s string) bool {
 	return err == nil
 }
 
-func normalizeationPath(pathStr string) string {
-	normalizedUrl := pathStr
-	var numRe = regexp.MustCompile(`\d+`)
-	normalizedUrl = numRe.ReplaceAllStringFunc(normalizedUrl, func(s string) string {
-		return "number"
-	})
-	if len(normalizedUrl) > 0 && normalizedUrl[len(normalizedUrl)-1] != '/' {
-		normalizedUrl += "/"
+func normalizeation(target, method string) string {
+	u, err := url.Parse(target)
+	if err != nil {
+		return target
 	}
-	return normalizedUrl
+	u.Fragment = ""
+	pathStr := normalizePath(u.Path)
+	queryStr := normalizeQuery(u)
+	var builder strings.Builder
+	builder.WriteString(strings.ToUpper(method))
+	builder.WriteString("|")
+	scheme := strings.ToLower(u.Scheme)
+	if scheme == "" {
+		scheme = "http"
+	}
+	builder.WriteString(scheme)
+	builder.WriteString("://")
+	builder.WriteString(strings.ToLower(u.Host))
+	builder.WriteString(pathStr)
+	if queryStr != "" {
+		builder.WriteString("?")
+		builder.WriteString(queryStr)
+	}
+	normalized := builder.String()
+	if log.Logger != nil {
+		log.Logger.Debugf("normalize url %s -> %s", target, normalized)
+	}
+	return utils.GetMD5(normalized)
 }
 
-func normalizeation(target, method string) string {
-	// 参数泛化
-	// 泛化方法 这里先已url泛化来去重
-	// 对 URL 中的查询参数进行排序，并将数字替换为 "@"
-	u, _ := url.Parse(target)
+func normalizePath(path string) string {
+	if path == "" {
+		return "/"
+	}
+	segments := strings.Split(path, "/")
+	var builder strings.Builder
+	for _, seg := range segments {
+		if seg == "" {
+			continue
+		}
+		decoded, err := url.PathUnescape(seg)
+		if err != nil {
+			decoded = seg
+		}
+		builder.WriteString("/")
+		builder.WriteString(classifyToken(decoded))
+	}
+	if builder.Len() == 0 {
+		return "/"
+	}
+	return builder.String()
+}
+
+func normalizeQuery(u *url.URL) string {
 	params := u.Query()
+	if len(params) == 0 {
+		return ""
+	}
 	keys := make([]string, 0, len(params))
 	for k := range params {
-		keys = append(keys, k)
+		keys = append(keys, strings.ToLower(k))
 	}
 	sort.Strings(keys)
-	paramsStr := ""
+	parts := make([]string, 0)
 	for _, k := range keys {
 		values := params[k]
+		sort.Strings(values)
+		if len(values) == 0 {
+			parts = append(parts, k+"=")
+			continue
+		}
 		for _, v := range values {
-			if isNumber(v) {
-				paramsStr += k + "=" + "@"
-			} else {
-				paramsStr += k + "=" + "$"
-			}
+			parts = append(parts, k+"="+classifyToken(v))
 		}
 	}
-	// path 泛化
-	normalizeStr := strings.ToLower(u.Host)
-	if u.Path != "" {
-		norPath := normalizeationPath(u.Path)
-		normalizeStr += norPath
-		// normalizeStr += u.Path
+	return strings.Join(parts, "&")
+}
 
+func classifyToken(token string) string {
+	if token == "" {
+		return token
 	}
-	if paramsStr != "" {
-		normalizeStr += paramsStr
+	clean := strings.TrimSpace(token)
+	if clean == "" {
+		return ""
 	}
-	// 对于 page/1 page/2 这种url进行处理 认为只有一个url
-	pathList := strings.Split(u.Path, "/")
-	if isNumber(pathList[len(pathList)-1]) {
-		normalizeStr = "|" + u.Scheme + "://" + u.Host + strings.Join(pathList[:len(pathList)-1], "/") + "/@"
-	} else {
-		normalizeStr = method + "|" + normalizeStr
+	if isNumber(clean) {
+		return "{num}"
 	}
-	log.Logger.Debugf("normalizeStr url %s -> %s", u, normalizeStr)
+	if uuidRegex.MatchString(clean) {
+		return "{uuid}"
+	}
+	if dateRegex.MatchString(clean) {
+		return "{date}"
+	}
+	if hexRegex.MatchString(clean) && len(clean) >= 8 {
+		return "{hex}"
+	}
+	if !looksLikeSlug(clean) {
+		if len(clean) > 40 {
+			return "{token}"
+		}
+		return strings.ToLower(clean)
+	}
+	return strings.ToLower(clean)
+}
 
-	return utils.GetMD5(normalizeStr)
+func looksLikeSlug(s string) bool {
+	for _, r := range s {
+		if !(unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' || r == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 func (ei *EngineInfo) urlIsExists(target string) bool {

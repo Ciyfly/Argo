@@ -10,6 +10,7 @@ import (
 	"argo/pkg/vector"
 	"bytes"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"runtime"
@@ -42,7 +43,6 @@ type EngineInfo struct {
 	HostName           string
 	TabCount           int
 	Page404Samples     []vector.Vector
-	Page404URLs        []string
 	Page404Dict        map[string]int
 
 	Scheduler *Scheduler
@@ -188,13 +188,7 @@ func (ei *EngineInfo) Start() error {
 	// 打开第一个tab页面 这里应该提交url管道任务
 	// go ei.NewTab(&UrlInfo{Url: ei.Target, Depth: 0, SourceType: "homePage", SourceUrl: "target"}, HOME_PAGE_FLAG)
 	ei.PushStaticUrl(&UrlInfo{Url: ei.Target, Depth: 0, SourceType: "homePage", SourceUrl: "target"})
-	ei.Page404URLs = make([]string, 0)
-	ei.Page404Samples = make([]vector.Vector, 0)
-	for i := 0; i < 3; i++ {
-		page404url := ei.Target + "/" + utils.GenRandStr()
-		ei.Page404URLs = append(ei.Page404URLs, page404url)
-		ei.PushStaticUrl(&UrlInfo{Url: page404url, Depth: 0, SourceType: "404", SourceUrl: "404"})
-	}
+	ei.Page404Samples = ei.fetch404Samples(3)
 	// dev模式的时候不会结束 为了从浏览器界面调试查看需要手动关闭
 	if conf.GlobalConfig.Dev {
 		log.Logger.Warn("!!! dev mode please ctrl +c kill !!!")
@@ -387,4 +381,36 @@ func (ei *EngineInfo) compare404Samples(current vector.Vector) float64 {
 		}
 	}
 	return maxSim
+}
+
+func (ei *EngineInfo) fetch404Samples(count int) []vector.Vector {
+	samples := make([]vector.Vector, 0, count)
+	client := &http.Client{Timeout: 8 * time.Second}
+	for len(samples) < count {
+		randURL := ei.Target + "/" + utils.GenRandStr()
+		req, err := http.NewRequest(http.MethodGet, randURL, nil)
+		if err != nil {
+			log.Logger.Debugf("fetch404Samples new request err: %s", err)
+			continue
+		}
+		if conf.GlobalConfig.BrowserConf.Proxy != "" {
+			proxyURL, err := url.Parse(conf.GlobalConfig.BrowserConf.Proxy)
+			if err == nil {
+				transport := &http.Transport{Proxy: http.ProxyURL(proxyURL)}
+				client.Transport = transport
+			}
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			log.Logger.Debugf("fetch404Samples err: %s", err)
+			continue
+		}
+		body, _ := ioutil.ReadAll(resp.Body)
+		resp.Body.Close()
+		if len(body) == 0 {
+			continue
+		}
+		samples = append(samples, vector.HTMLToVector(string(body)))
+	}
+	return samples
 }

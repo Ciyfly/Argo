@@ -127,10 +127,6 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 				if _, ok := ei.Page404Dict[ctx.Request.URL().String()]; ok {
 					return
 				}
-				if ctx.Request.URL().String() == ei.Page404URLs[0] {
-					// 随机请求的url 404
-					return
-				}
 				// fix 管道关闭了但是还推数据的问题
 				if ei.NormalizeCloseChanFlag {
 					return

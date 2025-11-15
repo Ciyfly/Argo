@@ -118,6 +118,12 @@ func main() {
 			Usage:    "Default phone if logging in.",
 			Category: DataArgsGroup,
 		},
+		&cli.IntFlag{
+			Name:     "logintimeout",
+			Value:    5,
+			Usage:    "Max seconds to wait for the login interaction before giving up.",
+			Category: DataArgsGroup,
+		},
 		&cli.StringFlag{
 			Name:     "playback",
 			Usage:    "Support replay like headless YAML scripts",

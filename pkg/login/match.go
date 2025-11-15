@@ -1,8 +1,10 @@
 package login
 
 import (
-	"argo/pkg/log"
+	"fmt"
 	"strings"
+
+	"argo/pkg/log"
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
@@ -36,151 +38,140 @@ var submitMatchList = []string{
 	"提交",
 }
 
+var attributeCandidates = []string{
+	"placeholder",
+	"name",
+	"aria-label",
+	"id",
+	"class",
+	"data-placeholder",
+	"data-label",
+	"data-login",
+	"autocomplete",
+	"value",
+}
+
+func attrLower(el *rod.Element, attr string) string {
+	if el == nil {
+		return ""
+	}
+	val, err := el.Attribute(attr)
+	if err != nil || val == nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(*val))
+}
+
+func matchKeywords(el *rod.Element, keywords []string) bool {
+	for _, attr := range attributeCandidates {
+		content := attrLower(el, attr)
+		if content == "" {
+			continue
+		}
+		for _, kw := range keywords {
+			if strings.Contains(content, strings.ToLower(kw)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func describeElement(el *rod.Element) string {
+	if el == nil {
+		return ""
+	}
+	placeholder := attrLower(el, "placeholder")
+	nameAttr := attrLower(el, "name")
+	idAttr := attrLower(el, "id")
+	classAttr := attrLower(el, "class")
+	return fmt.Sprintf("placeholder=%q name=%q id=%q class=%q", placeholder, nameAttr, idAttr, classAttr)
+}
+
 func (lp *LoginAutoData) matchLoginUsername() []*rod.Element {
-	// input type=text placeholder= 账号 用户
 	usernameElementList := []*rod.Element{}
 	inputs, err := lp.Page.Elements("input")
 	if err != nil {
 		log.Logger.Warnf("matchLoginUsername err: %s", err)
+		return usernameElementList
 	}
 	for _, input := range inputs {
-		eType, err := input.Attribute("type")
-		eName, err := input.Attribute("name")
-		if err != nil || eType == nil {
+		typ := attrLower(input, "type")
+		if typ == "" {
+			typ = "text"
+		}
+		if typ != "text" && typ != "search" && typ != "number" {
 			continue
 		}
-		ePlaceholder, _ := input.Attribute("placeholder")
-		if *eType != "text" || ePlaceholder == nil {
+		if matchKeywords(input, usernameMatchList) || attrLower(input, "autocomplete") == "username" {
+			usernameElementList = append(usernameElementList, input)
 			continue
-		}
-		lowEPlaceholder := strings.ToLower(*ePlaceholder)
-
-		if ePlaceholder == nil && eName != nil {
-			for _, um := range usernameMatchList {
-				if strings.Contains(lowEPlaceholder, um) {
-					usernameElementList = append(usernameElementList, input)
-				}
-			}
-		} else {
-			for _, um := range usernameMatchList {
-				if strings.Contains(lowEPlaceholder, um) {
-					usernameElementList = append(usernameElementList, input)
-				}
-			}
 		}
 	}
 	return usernameElementList
 }
 
 func (lp *LoginAutoData) matchLoginEmail() []*rod.Element {
-	// input type=text placeholder= 邮箱 email
 	emailElementList := []*rod.Element{}
 	inputs, err := lp.Page.Elements("input")
 	if err != nil {
 		log.Logger.Warnf("matchLoginemail err: %s", err)
+		return emailElementList
 	}
 	for _, input := range inputs {
-		eType, err := input.Attribute("type")
-		eName, err := input.Attribute("name")
-		if err != nil || eType == nil {
+		typ := attrLower(input, "type")
+		if typ != "email" && typ != "text" {
 			continue
 		}
-		ePlaceholder, _ := input.Attribute("placeholder")
-		if *eType != "text" && *eType != "email" || ePlaceholder == nil {
-			continue
-		}
-		if *eType == "email" {
+		if typ == "email" {
 			emailElementList = append(emailElementList, input)
 			continue
 		}
-		lowEPlaceholder := strings.ToLower(*ePlaceholder)
-
-		if ePlaceholder == nil && eName != nil {
-			// 不存在提示 但是存在name name = email/mail 这类
-			for _, um := range emailMatchList {
-				if strings.Contains(*eName, um) {
-					emailElementList = append(emailElementList, input)
-				}
-			}
-		} else {
-			for _, um := range emailMatchList {
-				if strings.Contains(lowEPlaceholder, um) {
-					emailElementList = append(emailElementList, input)
-				}
-			}
+		if matchKeywords(input, emailMatchList) {
+			emailElementList = append(emailElementList, input)
 		}
 	}
 	return emailElementList
 }
 
 func (lp *LoginAutoData) matchLoginPhone() []*rod.Element {
-	// input type=text placeholder= 手机号 电话号 phone
 	phoneElementList := []*rod.Element{}
 	inputs, err := lp.Page.Elements("input")
 	if err != nil {
 		log.Logger.Warnf("matchLoginphone err: %s", err)
+		return phoneElementList
 	}
 	for _, input := range inputs {
-		eType, err := input.Attribute("type")
-		eName, err := input.Attribute("name")
-		if err != nil || eType == nil {
+		typ := attrLower(input, "type")
+		if typ != "tel" && typ != "text" && typ != "number" {
 			continue
 		}
-		ePlaceholder, _ := input.Attribute("placeholder")
-		if *eType != "text" && *eType != "tel" || ePlaceholder == nil {
-			continue
-		}
-		if *eType == "tel" {
+		if typ == "tel" {
 			phoneElementList = append(phoneElementList, input)
 			continue
 		}
-
-		lowEPlaceholder := strings.ToLower(*ePlaceholder)
-
-		if ePlaceholder == nil && eName != nil {
-			for _, um := range phoneMatchList {
-				if strings.Contains(*eName, um) {
-					phoneElementList = append(phoneElementList, input)
-
-				}
-			}
-		} else {
-			for _, um := range phoneMatchList {
-				if strings.Contains(lowEPlaceholder, um) {
-					phoneElementList = append(phoneElementList, input)
-				}
-			}
+		if matchKeywords(input, phoneMatchList) || attrLower(input, "autocomplete") == "tel" {
+			phoneElementList = append(phoneElementList, input)
 		}
 	}
 	return phoneElementList
 }
 
 func (lp *LoginAutoData) matchLoginPassword() []*rod.Element {
-	// input type=password placeholder = 密码 password
 	passwordElementList := []*rod.Element{}
 	inputs, err := lp.Page.Elements("input")
 	if err != nil {
 		log.Logger.Warnf("matchLoginpassword err: %s", err)
+		return passwordElementList
 	}
 	for _, input := range inputs {
-		eType, err := input.Attribute("type")
-		if err != nil || eType == nil {
-			continue
-		}
-		ePlaceholder, _ := input.Attribute("placeholder")
-		if *eType != "password" || ePlaceholder == nil {
-			continue
-		}
-		lowEPlaceholder := strings.ToLower(*ePlaceholder)
-
-		if ePlaceholder == nil {
+		typ := attrLower(input, "type")
+		if typ == "password" {
 			passwordElementList = append(passwordElementList, input)
-		} else {
-			for _, um := range passwordMatchList {
-				if strings.Contains(lowEPlaceholder, um) {
-					passwordElementList = append(passwordElementList, input)
-				}
-			}
+			continue
+		}
+		if matchKeywords(input, passwordMatchList) {
+			passwordElementList = append(passwordElementList, input)
 		}
 	}
 	return passwordElementList
@@ -191,7 +182,6 @@ func (lp *LoginAutoData) matchLoginVerifCode() {
 }
 
 func (lp *LoginAutoData) matchLoginSubmit() []*rod.Element {
-	// button type=button/submit text 包含登录
 	submitElementList := []*rod.Element{}
 	buttons, err := lp.Page.Elements("button")
 	if err != nil {
@@ -214,17 +204,43 @@ func (lp *LoginAutoData) matchLoginSubmit() []*rod.Element {
 			}
 		}
 	}
+	inputButtons, err := lp.Page.Elements("input")
+	if err == nil {
+		for _, input := range inputButtons {
+			typ := attrLower(input, "type")
+			if typ != "submit" && typ != "button" {
+				continue
+			}
+			if matchKeywords(input, submitMatchList) || attrLower(input, "value") == "登录" {
+				submitElementList = append(submitElementList, input)
+			}
+		}
+	}
 	return submitElementList
 }
 
-func (lp *LoginAutoData) tryLogin() {
+func (lp *LoginAutoData) tryLogin(stageRecorder func(string)) {
 	usernameElementList := lp.matchLoginUsername()
 	passwordElementList := lp.matchLoginPassword()
 	emailElementList := lp.matchLoginEmail()
 	phoneElementList := lp.matchLoginPhone()
-	// lp.matchLoginVerifCode()
 	submitElementList := lp.matchLoginSubmit()
-	// 输入用户名
+
+	log.Logger.Debugf("[login match] username:%d password:%d email:%d phone:%d submit:%d",
+		len(usernameElementList), len(passwordElementList), len(emailElementList), len(phoneElementList), len(submitElementList))
+	for _, el := range usernameElementList {
+		log.Logger.Debugf("[login match] username field %s", describeElement(el))
+	}
+	for _, el := range passwordElementList {
+		log.Logger.Debugf("[login match] password field %s", describeElement(el))
+	}
+	if len(passwordElementList) == 0 || len(submitElementList) == 0 {
+		log.Logger.Warn("[login] 未找到密码或提交控件，跳过自动登录")
+		recordStage(stageRecorder, "interaction:login:missing_fields")
+		return
+	}
+
+	recordStage(stageRecorder, "interaction:login:fill_fields")
 	for _, ue := range usernameElementList {
 		ue.Input(lp.Username)
 	}
@@ -237,6 +253,7 @@ func (lp *LoginAutoData) tryLogin() {
 	for _, ph := range phoneElementList {
 		ph.Input(lp.Phone)
 	}
+	recordStage(stageRecorder, "interaction:login:click_submit")
 	for _, se := range submitElementList {
 		// se.MustClick()
 		// se.Click()

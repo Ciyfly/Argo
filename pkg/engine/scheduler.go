@@ -2,6 +2,7 @@ package engine
 
 import (
 	"container/heap"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -89,8 +90,14 @@ func (s *Scheduler) ingestLoop() {
 		if uif == nil || uif.Url == "" {
 			continue
 		}
-		if strings.Contains(uif.Url, "http") && !strings.Contains(uif.Url, s.engine.Host) {
-			continue
+		if s.engine.HostName != "" {
+			parsed, err := url.Parse(uif.Url)
+			if err != nil {
+				continue
+			}
+			if !strings.EqualFold(parsed.Hostname(), s.engine.HostName) {
+				continue
+			}
 		}
 		if filterStatic(uif.Url) {
 			continue
@@ -140,8 +147,8 @@ func (s *Scheduler) pushTabQueue(uif *UrlInfo) {
 func (s *Scheduler) tabWork() {
 	for {
 		select {
-	case s.tabLimit <- struct{}{}:
-		uif := <-s.tabQueue
+		case s.tabLimit <- struct{}{}:
+			uif := <-s.tabQueue
 			if uif == nil {
 				<-s.tabLimit
 				continue

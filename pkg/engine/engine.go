@@ -89,6 +89,8 @@ type EngineEvent struct {
 
 type UrlInfo struct {
 	Url        string
+	Canonical  string
+	Hash       string
 	Retries    int
 	SourceType string
 	Match      string
@@ -215,8 +217,40 @@ func (ei *EngineInfo) PushStaticUrl(uif *UrlInfo) {
 	if ei.Scheduler == nil || uif == nil {
 		return
 	}
+	if !ei.prepareUrl(uif) {
+		return
+	}
 	ei.Scheduler.Submit(uif)
 	ei.EmitEvent(EngineEvent{Type: "url_submit", Target: uif.Url, Timestamp: time.Now(), Data: map[string]interface{}{"source": uif.SourceType}})
+}
+
+func (ei *EngineInfo) prepareUrl(uif *UrlInfo) bool {
+	if uif == nil || uif.Url == "" {
+		return false
+	}
+	bases := []string{""}
+	if uif.SourceUrl != "" {
+		bases = append(bases, uif.SourceUrl)
+	}
+	if ei.Target != "" {
+		bases = append(bases, ei.Target)
+	}
+	var lastErr error
+	for _, base := range bases {
+		canonical, err := utils.CanonicalizeURL(uif.Url, base)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		uif.Canonical = canonical
+		uif.Url = canonical
+		uif.Hash = normalizeation(canonical, "GET")
+		return true
+	}
+	if lastErr != nil {
+		log.Logger.Debugf("[canonical skip] url=%s err=%v", uif.Url, lastErr)
+	}
+	return false
 }
 
 func (ei *EngineInfo) InitPipeline() {
@@ -243,6 +277,9 @@ func (ei *EngineInfo) InitPipeline() {
 
 func (ei *EngineInfo) runPageMiddlewares(ctx *PageContext) {
 	for _, middleware := range ei.PageMiddlewares {
+		if ctx != nil && ctx.StageRecorder != nil {
+			ctx.StageRecorder("middleware:" + middleware.Name())
+		}
 		if err := middleware.Handle(ctx); err != nil {
 			log.Logger.Warnf("middleware %s err: %s", middleware.Name(), err)
 		}

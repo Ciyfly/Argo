@@ -6,10 +6,11 @@ import (
 )
 
 type PageContext struct {
-	Engine   *EngineInfo
-	Page     *rod.Page
-	Url      *UrlInfo
-	PageFlag int
+	Engine        *EngineInfo
+	Page          *rod.Page
+	Url           *UrlInfo
+	PageFlag      int
+	StageRecorder func(string) // StageRecorder 用于在关键步骤更新 stage 以便定位超时
 }
 
 type PageMiddleware interface {
@@ -68,9 +69,18 @@ func (s *staticParseMiddleware) Handle(ctx *PageContext) error {
 func (i *interactionMiddleware) Name() string { return "interaction" }
 
 func (i *interactionMiddleware) Handle(ctx *PageContext) error {
-	urls := ctx.Engine.runInteractions(ctx.Page, ctx.Url, ctx.PageFlag == HOME_PAGE_FLAG)
+	if ctx == nil {
+		return nil
+	}
+	if ctx.StageRecorder != nil {
+		ctx.StageRecorder("interaction_chain:start")
+	}
+	urls := ctx.Engine.runInteractions(ctx.Page, ctx.Url, ctx.PageFlag == HOME_PAGE_FLAG, ctx.StageRecorder)
 	for _, u := range urls {
 		ctx.Engine.PushStaticUrl(&UrlInfo{Url: u, SourceType: "interaction", SourceUrl: ctx.Url.Url, Depth: ctx.Url.Depth + 1})
+	}
+	if ctx.StageRecorder != nil {
+		ctx.StageRecorder("interaction_chain:done")
 	}
 	return nil
 }

@@ -61,6 +61,9 @@ func (ei *EngineInfo) normalizeWork() {
 		}
 		// 获取后缀
 		urlStr := data.URL
+		if canonical, err := utils.CanonicalizeURL(urlStr, ""); err == nil {
+			urlStr = canonical
+		}
 		// http://testphp.vulnweb.com/AJAX/styles.css#2378123687
 		idx := strings.LastIndex(urlStr, "#")
 		if idx != -1 {

@@ -1,6 +1,9 @@
 package engine
 
 import (
+	"fmt"
+	"time"
+
 	"argo/pkg/conf"
 	"argo/pkg/inject"
 	"argo/pkg/log"
@@ -11,10 +14,11 @@ import (
 )
 
 type InteractionContext struct {
-	Engine  *EngineInfo
-	Page    *rod.Page
-	UrlInfo *UrlInfo
-	IsHome  bool
+	Engine        *EngineInfo
+	Page          *rod.Page
+	UrlInfo       *UrlInfo
+	IsHome        bool
+	StageRecorder func(string)
 }
 
 type Interaction interface {
@@ -30,6 +34,8 @@ var interactionRegistry = map[string]interactionFactory{
 	"auto":     func() Interaction { return &autoInteraction{} },
 }
 
+const defaultLoginInteractionTimeoutSeconds = 5
+
 func (ei *EngineInfo) InitInteractions() {
 	order := conf.GlobalConfig.AutoConf.Interactions
 	if len(order) == 0 {
@@ -44,18 +50,22 @@ func (ei *EngineInfo) InitInteractions() {
 	}
 }
 
-func (ei *EngineInfo) runInteractions(page *rod.Page, uif *UrlInfo, isHome bool) []string {
+func (ei *EngineInfo) runInteractions(page *rod.Page, uif *UrlInfo, isHome bool, stageRecorder func(string)) []string {
 	if len(ei.Interactions) == 0 || page == nil {
 		return nil
 	}
 	ctx := &InteractionContext{
-		Engine:  ei,
-		Page:    page,
-		UrlInfo: uif,
-		IsHome:  isHome,
+		Engine:        ei,
+		Page:          page,
+		UrlInfo:       uif,
+		IsHome:        isHome,
+		StageRecorder: stageRecorder,
 	}
 	var collected []string
 	for _, inter := range ei.Interactions {
+		if stageRecorder != nil {
+			stageRecorder("interaction:" + inter.Name())
+		}
 		urls, err := inter.Execute(ctx)
 		if err != nil {
 			log.Logger.Warnf("interaction %s err: %s", inter.Name(), err)
@@ -63,6 +73,9 @@ func (ei *EngineInfo) runInteractions(page *rod.Page, uif *UrlInfo, isHome bool)
 		}
 		if len(urls) > 0 {
 			collected = append(collected, urls...)
+		}
+		if stageRecorder != nil {
+			stageRecorder("interaction:" + inter.Name() + ":done")
 		}
 	}
 	return collected
@@ -73,8 +86,41 @@ type loginInteraction struct{}
 func (l *loginInteraction) Name() string { return "login" }
 
 func (l *loginInteraction) Execute(ctx *InteractionContext) ([]string, error) {
-	login.GlobalLoginAutoData.Handler(ctx.Page)
-	return nil, nil
+	if ctx == nil || ctx.Page == nil {
+		return nil, nil
+	}
+
+	timeoutSec := conf.GlobalConfig.LoginConf.Timeout
+	if timeoutSec <= 0 {
+		timeoutSec = defaultLoginInteractionTimeoutSeconds
+	}
+	timeout := time.Duration(timeoutSec) * time.Second
+	timeoutPage := ctx.Page.Timeout(timeout)
+	done := make(chan struct{}, 1)
+	go func() {
+		login.GlobalLoginAutoData.Handler(timeoutPage, ctx.StageRecorder)
+		done <- struct{}{}
+	}()
+
+	select {
+	case <-done:
+		timeoutPage.CancelTimeout()
+		if ctx.StageRecorder != nil {
+			ctx.StageRecorder("interaction:login:success")
+		}
+		return nil, nil
+	case <-time.After(timeout):
+		timeoutPage.CancelTimeout()
+		if ctx.StageRecorder != nil {
+			ctx.StageRecorder("interaction:login:timeout")
+		}
+		target := ""
+		if ctx.UrlInfo != nil {
+			target = ctx.UrlInfo.Url
+		}
+		log.Logger.Warnf("login interaction timeout (%ds): %s", timeoutSec, target)
+		return nil, fmt.Errorf("login interaction timeout after %ds", timeoutSec)
+	}
 }
 
 type playbackInteraction struct{}

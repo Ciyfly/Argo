@@ -65,6 +65,7 @@ GLOBAL OPTIONS:
    --email value               Default email if logging in. (default: "argo@recar.com")
    --password value, -p value  Default password if logging in. (default: "argo123")
    --phone value               Default phone if logging in. (default: "18888888888")
+   --logintimeout value        Max seconds to wait for the login interaction before giving up. (default: 5)
    --username value, -u value  Default username if logging in. (default: "argo")
 
    Debug
@@ -198,6 +199,10 @@ excel表格输出结果如下
 ## 自定义交互与管线
 
 - `auto.interactions`：控制登录/回放/自动化脚本的执行顺序，默认值为 `[login, playback, auto]`，可以在 `configs/config.yml` 中增删项以启停某些插件，或通过 `--interactions login,auto` 临时覆盖。
+- `login.timeout`：定义登录交互最长等待时间（秒），默认为 5，可在 `configs/config.yml` 或 `--logintimeout 20` 中覆盖；超时会记录 `stage=interaction:login:timeout` 便于诊断。
+- 登录交互会自动检测验证码（如腾讯防水墙、极验等），一旦命中会在 `logs/captcha/` 生成截图，同时在 CLI 中以 ASCII 形式预览并提示输入验证码；输入后会写回页面继续自动登录。若检测到滑块类验证码，则记录 `interaction:login:captcha_slider`，后续可扩展 JS 插件处理。
+- DOM 解析出的 URL 会经历统一的“清洗 → 过滤 → 绝对化”流程：`utils.CanonicalizeURL` 对原值做 HTML 实体反解与非法 scheme 过滤，并使用 `net/url.ResolveReference` 将相对路径、裸域名、`//cdn` 等转为绝对 http/https URL，同时重新编码 Query、去掉 Fragment。DEBUG 日志会输出 `url skip` 原因，便于排查。
+- 所有进入 Scheduler 的 URL 在 `PushStaticUrl` 内都会先 canonical 化并生成 hash，Scheduler 的 host 校验改为严格比对 hostname；`urlIsExists` 继续基于 hash 去重。这样“解析层 + 调度层 + normalize 层”共享同一 canonical 结果，避免重复任务和脏数据。
 - `auto.middlewares`：声明页面处理中间件顺序，内置 `static`（静态 DOM 解析）、`interaction`（执行交互插件并回灌 URL）、`metrics`（采集指标）。可在配置或 `--middlewares static,metrics` 中调整顺序与开关。
 - `metricsfile`：通过 CLI `--metricsfile report.json` 或配置写入 JSON 汇总，字段包括 pages_processed / urls_dropped / tabs_timeout / result_count，可用于离线分析，也可以访问 `http://127.0.0.1:5208/metrics` 查看实时 JSON。
 - `browser.max_retries`：控制 Tab 超时后的重试次数（默认 2 次），也可以用 `--maxretries` 临时覆盖；渐进式超时会在前几次失败后自动重试，超过上限才彻底放弃。

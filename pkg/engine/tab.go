@@ -162,7 +162,22 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 	var pageError error
 	var NormalDoneFlag = false
 	var TimeoutDoneFlag = false
-	stage := "init"
+	var stageValue atomic.Value
+	stageValue.Store("init")
+	setStage := func(s string) {
+		if s == "" {
+			s = "unknown"
+		}
+		stageValue.Store(s)
+	}
+	getStage := func() string {
+		if v := stageValue.Load(); v != nil {
+			if stageStr, ok := v.(string); ok && stageStr != "" {
+				return stageStr
+			}
+		}
+		return "unknown"
+	}
 	uif.Retries++
 	browserInfo := &BrowserInfo{
 		Page:     page,
@@ -180,14 +195,14 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 			tabDone <- true
 			return
 		}
-		stage = "open_page"
+		setStage("open_page")
 		page, pageError = browser.Page(proto.TargetCreateTarget{URL: uif.Url})
 		if pageError != nil {
 			page.Reload()
 		}
-		stage = "wait_load"
+		setStage("wait_load")
 		page.WaitLoad()
-		stage = "get_page_info"
+		setStage("page_info:init")
 		info, err := utils.GetPageInfoByPage(page)
 		if err != nil {
 			log.Logger.Errorf("GetPageInfoByPage: %s", err.Error())
@@ -195,6 +210,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 			return
 		}
 		// 404 页面判断
+		setStage("html_snapshot:init")
 		if pageFlag == RANDPAGE404_FLAG {
 			html, _ := page.HTML()
 			if len(html) > 0 {
@@ -209,6 +225,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 			ei.NormalCloseTab(browserInfo)
 			return
 		}
+		setStage("compare_404_vector")
 		// 调试模式 手动去操作 停止所有
 		if conf.GlobalConfig.Dev {
 			// ei.NormalCloseTab(page, pageFlag)
@@ -228,22 +245,29 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 			return
 		}
 		if conf.GlobalConfig.TestPlayBack {
+			setStage("test_playback_sleep")
 			time.Sleep(time.Duration(conf.GlobalConfig.BrowserConf.TabTimeout) * time.Second)
 			ei.NormalCloseTab(browserInfo)
 			return
 		}
 		log.Logger.Debugf("[ new tab  ]=> %s sourceType: %s sourceUrl: %s", uif.Url, uif.SourceType, uif.SourceUrl)
 		// 注入js dom构建前/后
+		setStage("inject_script:before")
 		inject.InjectScript(page, 0)
+		setStage("inject_script:after")
 		inject.InjectScript(page, 1)
 		ctx := &PageContext{
-			Engine:   ei,
-			Page:     page,
-			Url:      uif,
-			PageFlag: pageFlag,
+			Engine:        ei,
+			Page:          page,
+			Url:           uif,
+			PageFlag:      pageFlag,
+			StageRecorder: setStage,
 		}
+		setStage("middlewares:start")
 		ei.runPageMiddlewares(ctx)
+		setStage("middlewares:done")
 		// auto 触发后 获取下当前url
+		setStage("page_info:post_middlewares")
 		info, err = utils.GetPageInfoByPage(page)
 		var currentUrl = ""
 		if err != nil {
@@ -255,11 +279,13 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 		// close tab browser
 		NormalDoneFlag = true
 		if !TimeoutDoneFlag {
+			setStage("normal_close_tab")
 			ei.NormalCloseTab(browserInfo)
 		}
 		// 推送下如果 单纯的去修改当前页面url的形式
 		// https://spa5.scrape.center/page/1
 		if currentUrl != "" {
+			setStage("push_patch_urls")
 			PushUrlWg.Add(1)
 			go func(currentUrl string) {
 				defer PushUrlWg.Done()
@@ -267,7 +293,9 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 			}(currentUrl)
 		}
 		// 所有url提交完成才能结束
+		setStage("wait_push_urls")
 		PushUrlWg.Wait()
+		setStage("wait_push_urls_done")
 
 	}() // 协程
 	// 阻塞超时控制
@@ -275,11 +303,12 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 	case <-tabDone:
 		log.Logger.Debugf("[close tab ] => %s", uif.Url)
 	case <-time.After(time.Duration(conf.GlobalConfig.BrowserConf.TabTimeout) * time.Second):
-		log.Logger.Warnf("[timeout tab ] => %s stage=%s", uif.Url, stage)
+		currentStage := getStage()
+		log.Logger.Warnf("[timeout tab ] => %s stage=%s", uif.Url, currentStage)
 		if !NormalDoneFlag {
 			atomic.AddInt64(&ei.TabsTimeout, 1)
-			ei.EmitEvent(EngineEvent{Type: "tab_timeout", Target: uif.Url, Timestamp: time.Now(), Data: map[string]interface{}{"stage": stage}})
-			ei.RecordTimeoutReason(stage)
+			ei.EmitEvent(EngineEvent{Type: "tab_timeout", Target: uif.Url, Timestamp: time.Now(), Data: map[string]interface{}{"stage": currentStage}})
+			ei.RecordTimeoutReason(currentStage)
 			TimeoutDoneFlag = true
 			ei.TimeoutCloseTab(browserInfo)
 			if uif.Retries <= ei.MaxRetries {

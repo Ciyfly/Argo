@@ -3,6 +3,7 @@ login:
   password: "argo123"
   email: "argo@recar.com"
   phone: "18888888888"
+  timeout: 5 # 登录交互阶段超时时间(秒)
 browser:
   unheadless: false # 开启则界面
   trace: false # 有界面时显示点击了哪些

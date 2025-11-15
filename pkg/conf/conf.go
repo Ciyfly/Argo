@@ -22,6 +22,7 @@ var defaultYamlConfigStr = `login:
   password: "argo123"
   email: "argo@recar.com"
   phone: "18888888888"
+  timeout: 5 # 登录交互阶段超时时间(秒)
 browser:
   unheadless: false # 开启则界面
   trace: false # 有界面时显示点击了哪些
@@ -69,6 +70,7 @@ type LoginConf struct {
 	Password string `yaml:"password"`
 	Email    string `yaml:"email"`
 	Phone    string `yaml:"phone"`
+	Timeout  int    `yaml:"timeout"`
 }
 
 // 浏览器参数
@@ -146,6 +148,7 @@ func MergeArgs(c *cli.Context) {
 	slow := c.Float64("slow")
 	username := c.String("username")
 	password := c.String("password")
+	loginTimeout := c.Int("logintimeout")
 	proxy := c.String("proxy")
 	tabCount := c.Int("tabcount")
 	tabTimeout := c.Int("tabtimeout")
@@ -237,6 +240,9 @@ func MergeArgs(c *cli.Context) {
 	}
 	if password != GlobalConfig.LoginConf.Password {
 		GlobalConfig.LoginConf.Password = password
+	}
+	if loginTimeout > 0 && loginTimeout != GlobalConfig.LoginConf.Timeout {
+		GlobalConfig.LoginConf.Timeout = loginTimeout
 	}
 	// auto
 	if slow != GlobalConfig.AutoConf.Slow {

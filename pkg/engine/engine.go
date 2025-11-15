@@ -41,8 +41,8 @@ type EngineInfo struct {
 	Host               string
 	HostName           string
 	TabCount           int
-	Page404PageURl     string
-	Page404Vector      vector.Vector
+	Page404Samples     []vector.Vector
+	Page404URLs        []string
 	Page404Dict        map[string]int
 
 	Scheduler *Scheduler
@@ -188,9 +188,11 @@ func (ei *EngineInfo) Start() error {
 	// 打开第一个tab页面 这里应该提交url管道任务
 	// go ei.NewTab(&UrlInfo{Url: ei.Target, Depth: 0, SourceType: "homePage", SourceUrl: "target"}, HOME_PAGE_FLAG)
 	ei.PushStaticUrl(&UrlInfo{Url: ei.Target, Depth: 0, SourceType: "homePage", SourceUrl: "target"})
-	for i := 0; i < 2; i++ {
+	ei.Page404URLs = make([]string, 0)
+	ei.Page404Samples = make([]vector.Vector, 0)
+	for i := 0; i < 3; i++ {
 		page404url := ei.Target + "/" + utils.GenRandStr()
-		ei.Page404PageURl = page404url
+		ei.Page404URLs = append(ei.Page404URLs, page404url)
 		ei.PushStaticUrl(&UrlInfo{Url: page404url, Depth: 0, SourceType: "404", SourceUrl: "404"})
 	}
 	// dev模式的时候不会结束 为了从浏览器界面调试查看需要手动关闭
@@ -368,4 +370,21 @@ func transformHttpHeaders(rspHeaders []*proto.FetchHeaderEntry) http.Header {
 		newRspHeaders.Add(data.Name, data.Value)
 	}
 	return newRspHeaders
+}
+
+func (ei *EngineInfo) compare404Samples(current vector.Vector) float64 {
+	if len(ei.Page404Samples) == 0 || current == nil {
+		return 0
+	}
+	var maxSim float64
+	for _, sample := range ei.Page404Samples {
+		if sample == nil {
+			continue
+		}
+		sim := vector.CosineSimilarity(sample, current)
+		if sim > maxSim {
+			maxSim = sim
+		}
+	}
+	return maxSim
 }

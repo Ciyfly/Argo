@@ -127,7 +127,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 				if _, ok := ei.Page404Dict[ctx.Request.URL().String()]; ok {
 					return
 				}
-				if ctx.Request.URL().String() == ei.Page404PageURl {
+				if ctx.Request.URL().String() == ei.Page404URLs[0] {
 					// 随机请求的url 404
 					return
 				}
@@ -197,7 +197,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 		if pageFlag == RANDPAGE404_FLAG {
 			html, _ := page.HTML()
 			if len(html) > 0 {
-				ei.Page404Vector = vector.HTMLToVector(html)
+				ei.Page404Samples = append(ei.Page404Samples, vector.HTMLToVector(html))
 			}
 			ei.NormalCloseTab(browserInfo)
 			return
@@ -216,9 +216,9 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 
 		// 判断页面是不是404页面
 		currentPageVector := vector.HTMLToVector(html)
-		similarity := vector.CosineSimilarity(ei.Page404Vector, currentPageVector)
-		log.Logger.Debugf("similarity: %f", similarity)
-		if similarity > 0.95 {
+		similarity := ei.compare404Samples(currentPageVector)
+		log.Logger.Debugf("404 similarity: %f", similarity)
+		if similarity >= 0.92 {
 			ei.Page404Dict[uif.Url] = 1
 			log.Logger.Debugf("similarity: %f", similarity)
 			log.Logger.Debugf("404 page: %s", uif.Url)

@@ -42,6 +42,7 @@ type EngineInfo struct {
 	Host               string
 	HostName           string
 	TabCount           int
+	MaxRetries         int
 	Page404Samples     []vector.Vector
 	Page404Dict        map[string]int
 
@@ -84,6 +85,7 @@ type EngineEvent struct {
 
 type UrlInfo struct {
 	Url        string
+	Retries    int
 	SourceType string
 	Match      string
 	SourceUrl  string
@@ -161,6 +163,10 @@ func InitEngineInfo(target string) *EngineInfo {
 
 func (ei *EngineInfo) InitScheduler() {
 	ei.Scheduler = NewScheduler(ei)
+	ei.MaxRetries = conf.GlobalConfig.BrowserConf.MaxRetries
+	if ei.MaxRetries <= 0 {
+		ei.MaxRetries = 2
+	}
 	ei.Scheduler.Start()
 }
 

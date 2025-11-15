@@ -13,6 +13,7 @@ browser:
   max_depth: 10 # 爬行最大深度
   queue_size: 100000 # URL 队列最大容量
   schedule_interval: 0 # 调度间隔(ms)，0 表示不限速
+  max_retries: 2 # Tab 超时重试次数
 auto:
   slow: 1000 # 事件触发的延迟时间
   filter: ["lougout", "登出", "reset"] # 包含这种字符的就不进行触发事件

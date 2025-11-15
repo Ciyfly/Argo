@@ -83,6 +83,7 @@ type BrowserConf struct {
 	Chrome           string `yaml:"chrome"`
 	QueueSize        int    `yaml:"queue_size"`
 	ScheduleInterval int    `yaml:"schedule_interval"`
+	MaxRetries       int    `yaml:"max_retries"`
 }
 
 // auto 自动触发的一些参数
@@ -171,6 +172,7 @@ func MergeArgs(c *cli.Context) {
 	maxDepth := c.Int("maxdepth")
 	queueSize := c.Int("queuesize")
 	scheduleInterval := c.Int("scheduleinterval")
+	maxRetries := c.Int("maxretries")
 
 	// 目标
 	if target != "" {
@@ -264,6 +266,9 @@ func MergeArgs(c *cli.Context) {
 	// 优化控制
 	GlobalConfig.NoReqRspStr = norrs
 	GlobalConfig.BrowserConf.MaxDepth = maxDepth
+	if maxRetries != 0 {
+		GlobalConfig.BrowserConf.MaxRetries = maxRetries
+	}
 
 }
 

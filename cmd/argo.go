@@ -148,6 +148,12 @@ func main() {
 			Category: ConfigArgsGroup,
 		},
 		&cli.IntFlag{
+			Name:     "maxretries",
+			Value:    2,
+			Usage:    "Number of times to retry a timed-out tab before giving up.",
+			Category: ConfigArgsGroup,
+		},
+		&cli.IntFlag{
 			Name:     "browsertimeout",
 			Value:    3600,
 			Usage:    "Set max browser run time, close if limit exceeded. Unit is seconds.",

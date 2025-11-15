@@ -162,6 +162,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 	var pageError error
 	var NormalDoneFlag = false
 	var TimeoutDoneFlag = false
+	uif.Retries++
 	browserInfo := &BrowserInfo{
 		Page:     page,
 		Options:  options,
@@ -276,6 +277,10 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 			ei.EmitEvent(EngineEvent{Type: "tab_timeout", Target: uif.Url, Timestamp: time.Now()})
 			TimeoutDoneFlag = true
 			ei.TimeoutCloseTab(browserInfo)
+			if uif.Retries <= ei.MaxRetries {
+				log.Logger.Debugf("requeue timeout url %s retries=%d", uif.Url, uif.Retries)
+				ei.PushStaticUrl(uif)
+			}
 		}
 	}
 }

@@ -200,6 +200,7 @@ excel表格输出结果如下
 - `auto.interactions`：控制登录/回放/自动化脚本的执行顺序，默认值为 `[login, playback, auto]`，可以在 `configs/config.yml` 中增删项以启停某些插件，或通过 `--interactions login,auto` 临时覆盖。
 - `auto.middlewares`：声明页面处理中间件顺序，内置 `static`（静态 DOM 解析）、`interaction`（执行交互插件并回灌 URL）、`metrics`（采集指标）。可在配置或 `--middlewares static,metrics` 中调整顺序与开关。
 - `metricsfile`：通过 CLI `--metricsfile report.json` 或配置写入 JSON 汇总，字段包括 pages_processed / urls_dropped / tabs_timeout / result_count，可用于离线分析，也可以访问 `http://127.0.0.1:5208/metrics` 查看实时 JSON。
+- `browser.max_retries`：控制 Tab 超时后的重试次数（默认 2 次），也可以用 `--maxretries` 临时覆盖；渐进式超时会在前几次失败后自动重试，超过上限才彻底放弃。
 - `result.mq`：可将结果推送至简单的 HTTP“消息队列”，示例：
   ```yaml
   result:

@@ -64,6 +64,9 @@ type EngineInfo struct {
 	PagesProcessed  int64
 	UrlsDropped     int64
 	TabsTimeout     int64
+	timeoutReasonMu sync.Mutex
+	TimeoutReasons  map[string]int
+
 	eventHandlersMu sync.RWMutex
 	eventHandlers   []func(EngineEvent)
 }
@@ -194,6 +197,7 @@ func (ei *EngineInfo) Start() error {
 	// 打开第一个tab页面 这里应该提交url管道任务
 	// go ei.NewTab(&UrlInfo{Url: ei.Target, Depth: 0, SourceType: "homePage", SourceUrl: "target"}, HOME_PAGE_FLAG)
 	ei.PushStaticUrl(&UrlInfo{Url: ei.Target, Depth: 0, SourceType: "homePage", SourceUrl: "target"})
+	ei.TimeoutReasons = make(map[string]int)
 	ei.Page404Samples = ei.fetch404Samples(3)
 	// dev模式的时候不会结束 为了从浏览器界面调试查看需要手动关闭
 	if conf.GlobalConfig.Dev {
@@ -419,4 +423,16 @@ func (ei *EngineInfo) fetch404Samples(count int) []vector.Vector {
 		samples = append(samples, vector.HTMLToVector(string(body)))
 	}
 	return samples
+}
+
+func (ei *EngineInfo) RecordTimeoutReason(stage string) {
+	if stage == "" {
+		stage = "unknown"
+	}
+	ei.timeoutReasonMu.Lock()
+	defer ei.timeoutReasonMu.Unlock()
+	if ei.TimeoutReasons == nil {
+		ei.TimeoutReasons = make(map[string]int)
+	}
+	ei.TimeoutReasons[stage]++
 }

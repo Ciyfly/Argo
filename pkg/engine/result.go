@@ -145,4 +145,11 @@ func (ei *EngineInfo) SaveResult() {
 
 func (ei *EngineInfo) logMetrics() {
 	log.Logger.Infof("[ metrics ] pages=%d dropped=%d tab_timeout=%d", ei.PagesProcessed, ei.UrlsDropped, ei.TabsTimeout)
+	ei.timeoutReasonMu.Lock()
+	if len(ei.TimeoutReasons) > 0 {
+		for stage, count := range ei.TimeoutReasons {
+			log.Logger.Infof("[ timeout reason ] stage=%s count=%d", stage, count)
+		}
+	}
+	ei.timeoutReasonMu.Unlock()
 }

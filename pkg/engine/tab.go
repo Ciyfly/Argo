@@ -162,6 +162,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 	var pageError error
 	var NormalDoneFlag = false
 	var TimeoutDoneFlag = false
+	stage := "init"
 	uif.Retries++
 	browserInfo := &BrowserInfo{
 		Page:     page,
@@ -179,11 +180,14 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 			tabDone <- true
 			return
 		}
+		stage = "open_page"
 		page, pageError = browser.Page(proto.TargetCreateTarget{URL: uif.Url})
 		if pageError != nil {
 			page.Reload()
 		}
+		stage = "wait_load"
 		page.WaitLoad()
+		stage = "get_page_info"
 		info, err := utils.GetPageInfoByPage(page)
 		if err != nil {
 			log.Logger.Errorf("GetPageInfoByPage: %s", err.Error())
@@ -271,10 +275,11 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 	case <-tabDone:
 		log.Logger.Debugf("[close tab ] => %s", uif.Url)
 	case <-time.After(time.Duration(conf.GlobalConfig.BrowserConf.TabTimeout) * time.Second):
-		log.Logger.Warnf("[timeout tab ] => %s", uif.Url)
+		log.Logger.Warnf("[timeout tab ] => %s stage=%s", uif.Url, stage)
 		if !NormalDoneFlag {
 			atomic.AddInt64(&ei.TabsTimeout, 1)
-			ei.EmitEvent(EngineEvent{Type: "tab_timeout", Target: uif.Url, Timestamp: time.Now()})
+			ei.EmitEvent(EngineEvent{Type: "tab_timeout", Target: uif.Url, Timestamp: time.Now(), Data: map[string]interface{}{"stage": stage}})
+			ei.RecordTimeoutReason(stage)
 			TimeoutDoneFlag = true
 			ei.TimeoutCloseTab(browserInfo)
 			if uif.Retries <= ei.MaxRetries {

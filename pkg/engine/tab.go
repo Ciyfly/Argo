@@ -196,7 +196,9 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 		// 404 页面判断
 		if pageFlag == RANDPAGE404_FLAG {
 			html, _ := page.HTML()
-			ei.Page404Vector = vector.HTMLToVector(html)
+			if len(html) > 0 {
+				ei.Page404Vector = vector.HTMLToVector(html)
+			}
 			ei.NormalCloseTab(browserInfo)
 			return
 		}

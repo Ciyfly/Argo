@@ -188,10 +188,11 @@ func (ei *EngineInfo) Start() error {
 	// 打开第一个tab页面 这里应该提交url管道任务
 	// go ei.NewTab(&UrlInfo{Url: ei.Target, Depth: 0, SourceType: "homePage", SourceUrl: "target"}, HOME_PAGE_FLAG)
 	ei.PushStaticUrl(&UrlInfo{Url: ei.Target, Depth: 0, SourceType: "homePage", SourceUrl: "target"})
-	page404url := ei.Target + "/" + utils.GenRandStr()
-	ei.Page404PageURl = page404url
-	// go ei.NewTab(&UrlInfo{Url: page404url, Depth: 0, SourceType: "404", SourceUrl: "404"}, RANDPAGE404_FLAG)
-	ei.PushStaticUrl(&UrlInfo{Url: page404url, Depth: 0, SourceType: "404", SourceUrl: "404"})
+	for i := 0; i < 2; i++ {
+		page404url := ei.Target + "/" + utils.GenRandStr()
+		ei.Page404PageURl = page404url
+		ei.PushStaticUrl(&UrlInfo{Url: page404url, Depth: 0, SourceType: "404", SourceUrl: "404"})
+	}
 	// dev模式的时候不会结束 为了从浏览器界面调试查看需要手动关闭
 	if conf.GlobalConfig.Dev {
 		log.Logger.Warn("!!! dev mode please ctrl +c kill !!!")

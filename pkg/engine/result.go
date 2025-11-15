@@ -8,11 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path"
-	"strconv"
 	"strings"
-	"text/template"
-
-	"github.com/tealeg/xlsx"
 )
 
 // 输出结果
@@ -24,41 +20,55 @@ type HtmlData struct {
 	Count      int
 }
 
-type FormatOutputFunc func(name string)
-
-var ResultHtmlData *HtmlData
-var ResultList []*PendingUrl
-var ResultQueue chan *PendingUrl
-var FormatMap map[string]FormatOutputFunc
-
-func InitResultHandler() {
-	ResultList = make([]*PendingUrl, 0)
-	ResultQueue = make(chan *PendingUrl)
-	FormatMap = make(map[string]FormatOutputFunc)
-	go resultHandlerWork()
-	FormatMap["json"] = writeResultToJson
-	FormatMap["txt"] = writeResultToText
-	FormatMap["xlsx"] = writeResultToXlsx
-	FormatMap["html"] = writeResultToHtml
+type ResultSink interface {
+	Name() string
+	Save(ei *EngineInfo, path string) error
 }
 
-func pushResult(pu *PendingUrl) {
-	ResultQueue <- pu
+func (ei *EngineInfo) InitResultHandler() {
+	ei.ResultList = make([]*PendingUrl, 0)
+	ei.ResultQueue = make(chan *PendingUrl)
+	ei.ResultSinks = make(map[string]ResultSink)
+	ei.registerDefaultSinks()
+	go ei.resultHandlerWork()
 }
 
-func resultHandlerWork() {
-	for data := range ResultQueue {
+func (ei *EngineInfo) registerDefaultSinks() {
+	sinks := []ResultSink{
+		&jsonSink{},
+		&textSink{},
+		&xlsxSink{},
+		&htmlSink{},
+		&jsonlSink{},
+	}
+	for _, sink := range sinks {
+		ei.ResultSinks[sink.Name()] = sink
+	}
+	if conf.GlobalConfig.ResultConf.MQ.Type != "" {
+		ei.ResultSinks["mq"] = newMQSink(conf.GlobalConfig.ResultConf.MQ)
+	}
+}
+
+func (ei *EngineInfo) pushResult(pu *PendingUrl) {
+	if ei.ResultQueue == nil {
+		return
+	}
+	ei.ResultQueue <- pu
+}
+
+func (ei *EngineInfo) resultHandlerWork() {
+	for data := range ei.ResultQueue {
 		if conf.GlobalConfig.Quiet {
 			jsonData, _ := json.Marshal(data)
 			fmt.Println(string(jsonData))
 		} else {
-			ResultList = append(ResultList, data)
+			ei.ResultList = append(ei.ResultList, data)
 			log.Logger.Infof("[%s] %s", data.Method, data.URL)
 		}
 	}
 }
 
-func writeResult(name string, data []byte) {
+func (ei *EngineInfo) writeResult(name string, data []byte) {
 	resultFile, err := os.Create(name)
 	if err != nil {
 		log.Logger.Errorf(" %s file creation error: %s", name, err)
@@ -72,88 +82,18 @@ func writeResult(name string, data []byte) {
 		return
 	}
 }
-func writeResultToJson(name string) {
-	jsonData, err := json.MarshalIndent(ResultList, "", "    ")
-	if err != nil {
-		log.Logger.Errorf("save result err: %s", err)
-		return
-	}
-	writeResult(name, jsonData)
-}
-
-func writeResultToText(name string) {
-	txtDate := ""
-	urlCount := 0
-	for _, r := range ResultList {
-		urlCount += 1
-		txtDate += fmt.Sprintf("[%s]%s\n", r.Method, r.URL)
-	}
-	writeResult(name, []byte(txtDate))
-}
-
-func writeResultToXlsx(name string) {
-	xlsxFile := xlsx.NewFile()
-	sheet, err := xlsxFile.AddSheet("Argo result")
-	if err != nil {
-		log.Logger.Errorf("writeResultToXlsx err: %s", err)
-	}
-	titles := []string{"method", "url", "data", "status"}
-	row := sheet.AddRow()
-
-	var cell *xlsx.Cell
-	for _, title := range titles {
-		cell = row.AddCell()
-		cell.Value = title
-	}
-	// 设置宽度
-	sheet.SetColWidth(0, 0, 5)
-	sheet.SetColWidth(1, 1, 80)
-	sheet.SetColWidth(2, 2, 80)
-	sheet.SetColWidth(3, 3, 5)
-	for _, data := range ResultList {
-		values := []string{
-			data.Method,
-			data.URL,
-			data.Data,
-			strconv.Itoa(data.Status),
-		}
-
-		row = sheet.AddRow()
-
-		for _, value := range values {
-			cell = row.AddCell()
-			cell.Value = value
-		}
-	}
-	err = xlsxFile.Save(name)
-
-}
-
-func writeResultToHtml(name string) {
-	t, err := template.New("result").Parse(ResultHtmlTemplate)
-	if err != nil {
-		log.Logger.Errorf("writeResultToHtml err: %s", err)
-	}
-	resultFile, err := os.Create(name)
-	if err != nil {
-		log.Logger.Errorf(" %s file creation error: %s", name, err)
-		return
-	}
-	defer resultFile.Close()
-	err = t.Execute(resultFile, ResultHtmlData)
-	if err != nil {
-		log.Logger.Errorf(" %s file creation error: %s", name, err)
-		return
-	}
-}
 
 func (ei *EngineInfo) SaveResult() {
 	log.Logger.Infof("[tab  count] %d", ei.TabCount)
-	if len(ResultList) < 2 {
+	if len(ei.ResultList) < 2 {
 		log.Logger.Errorf("No content crawled, you can contact the developer to recar target: %s", ei.HostName)
+		if ei.ResultQueue != nil {
+			close(ei.ResultQueue)
+		}
+		ei.logMetrics()
 		return
 	}
-	log.Logger.Infof("[  result  ] %d", len(ResultList))
+	log.Logger.Infof("[  result  ] %d", len(ei.ResultList))
 	var ResultOutPutDir string
 	if conf.GlobalConfig.ResultConf.OutputDir == "" {
 		ResultOutPutDir = path.Join(utils.GetCurrentDirectory(), "result", ei.HostName)
@@ -172,22 +112,37 @@ func (ei *EngineInfo) SaveResult() {
 	}
 	formatList := strings.Split(conf.GlobalConfig.ResultConf.Format, ",")
 	for _, format := range formatList {
+		format = strings.TrimSpace(format)
+		if format == "" {
+			continue
+		}
+		sink, ok := ei.ResultSinks[format]
+		if !ok {
+			log.Logger.Errorf("format not found: %s", format)
+			continue
+		}
 		if format == "html" {
-			ResultHtmlData = &HtmlData{
+			ei.ResultHtmlData = &HtmlData{
 				HostName:   ei.HostName,
 				DateTime:   utils.GetCurrentTime(),
-				ResultList: ResultList,
-				Count:      len(ResultList),
+				ResultList: ei.ResultList,
+				Count:      len(ei.ResultList),
 			}
 		}
-		if _, ok := FormatMap[format]; ok {
-			fileName := saveName + "." + format
-			filePath := path.Join(ResultOutPutDir, fileName)
-			FormatMap[format](filePath)
-			log.Logger.Infof("[   save   ] %s", filePath)
-		} else {
-			log.Logger.Errorf("format out found: %s", format)
+		fileName := saveName + "." + format
+		filePath := path.Join(ResultOutPutDir, fileName)
+		if err := sink.Save(ei, filePath); err != nil {
+			log.Logger.Errorf("save %s err: %s", format, err)
+			continue
 		}
+		log.Logger.Infof("[   save   ] %s", filePath)
 	}
+	if ei.ResultQueue != nil {
+		close(ei.ResultQueue)
+	}
+	ei.logMetrics()
+}
 
+func (ei *EngineInfo) logMetrics() {
+	log.Logger.Infof("[ metrics ] pages=%d dropped=%d tab_timeout=%d", ei.PagesProcessed, ei.UrlsDropped, ei.TabsTimeout)
 }

@@ -13,145 +13,121 @@ import (
 
 var AutoJsTemplate = `
 function run(){
-    function sleep(ms) {
-        return new Promise(res => setTimeout(res, ms));
-    }
-    var NodeArrays = new Array();
-    var HrefArrays = new Array();
-    var FilterTags = ["HTML", "HEAD", "META", "TITLE", "LINK", "STYLE", "IMG", "DIV", "SCRIPT"];
-    var username = "%s";
-    var password = "%s";
-    var email = "%s"
-    var phone = "%s";
-    var slow = %f;
-    var filter = ["%s"];
+    const sleep = (ms) => new Promise(res => setTimeout(res, ms));
+    const skipTags = ["HTML","HEAD","META","TITLE","STYLE","SCRIPT"];
+    const username = "%s";
+    const password = "%s";
+    const email = "%s";
+    const phone = "%s";
+    const slow = %f;
+    const filter = ["%s"].filter(Boolean);
+    const actionLimit = 200;
+    const queuedUrls = new Set();
+    const visited = new WeakSet();
+    const queue = [];
+    let actions = 0;
 
-    // 判断是否是过滤的 不包含过滤字符串才进行点击
-    function filterClick(node){
-        var lowText = node.outerHTML.toLowerCase()
-        for (const f of filter) {
-            if (lowText.includes(f)){
-                 console.log("filter -> ",lowText)
-                return
-            }
-        }
-        console.log("click -> ",lowText)
-        node.click();
-    }
-    
-    function treeWalkerFilter(element) {
-        if (element.nodeType === Node.ELEMENT_NODE) {
-            return NodeFilter.FILTER_ACCEPT;
-        }
-    }
-    function nodeRecur(ch){
-        for(var i=0;i<ch.length;i++){
-            if (FilterTags.indexOf(ch[i].tagName)<0){
-                NodeArrays.unshift(ch[i])
-            }
-            
-            if(ch[i].children.length>0){
-                nodeRecur(ch[i].children)
-            }
-        }
-    }
+    const shouldSkip = (node) => {
+        if (!node || !node.tagName) return true;
+        if (visited.has(node)) return true;
+        return skipTags.indexOf(node.tagName) >= 0;
+    };
 
-    async function auto (){
-        treeWalker = document.createTreeWalker(
-            document,
-            NodeFilter.SHOW_ELEMENT,
-            treeWalkerFilter,
-            false
-        );
-        var observer = new MutationObserver(function(mutations ){
-            mutations.forEach(function (mutation) {
-                if (mutation.type === 'childList') {
-                    // 在创建新的 element 时调用
-                    console.log("child append ", mutation.target);
-                    nodeRecur(mutation.target.children)
-                } else if (mutation.type === 'attributes') {
-                    // 在属性发生变化时调用
-                    console.log("attributes: ");
-                    console.log(mutation);
-                }
-            });
+    const enqueueNode = (node) => {
+        if (shouldSkip(node)) return;
+        visited.add(node);
+        queue.push(node);
+    };
+
+    const enqueueUrl = (url) => {
+        if (!url) return;
+        queuedUrls.add(url);
+    };
+
+    const matchesFilter = (node) => {
+        const html = node.outerHTML ? node.outerHTML.toLowerCase() : "";
+        return filter.some(f => html.includes(f));
+    };
+
+    const triggerInput = (node, value) => {
+        node.focus && node.focus();
+        node.value = value;
+        node.dispatchEvent(new Event('input', {bubbles:true}));
+        node.dispatchEvent(new Event('change', {bubbles:true}));
+    };
+
+    const isClickable = (node) => {
+        if (!node) return false;
+        const tag = node.tagName;
+        if (tag === 'BUTTON') return true;
+        if (tag === 'A') return true;
+        if (tag === 'INPUT' && ['button','submit'].includes(node.type)) return true;
+        if (node.getAttribute('role') === 'button') return true;
+        if (node.onclick || node.getAttribute('data-click') || node.getAttribute('ng-click')) return true;
+        return false;
+    };
+
+    const clickNode = async (node) => {
+        if (!node || matchesFilter(node)) return;
+        node.focus && node.focus();
+        node.dispatchEvent(new MouseEvent('pointerdown', {bubbles:true}));
+        node.dispatchEvent(new MouseEvent('mousedown', {bubbles:true}));
+        node.click && node.click();
+        node.dispatchEvent(new MouseEvent('mouseup', {bubbles:true}));
+        node.dispatchEvent(new MouseEvent('pointerup', {bubbles:true}));
+        await sleep(slow);
+    };
+
+    const processNode = async (node) => {
+        if (!node) return;
+        if (node.tagName === 'A') {
+            const href = node.getAttribute('href');
+            if (href && !href.startsWith('javascript') && href !== '#') {
+                enqueueUrl(href);
+            }
+        }
+        if (node.tagName === 'INPUT') {
+            const type = node.type || 'text';
+            if (['text','search','url','password'].includes(type)) {
+                triggerInput(node, username);
+            } else if (type === 'email') {
+                triggerInput(node, email);
+            } else if (type === 'tel') {
+                triggerInput(node, phone);
+            }
+        }
+        if (isClickable(node)) {
+            await clickNode(node);
+        }
+    };
+
+    const observer = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+            mutation.addedNodes && mutation.addedNodes.forEach(enqueueNode);
         });
-        
-        observer.observe(window.document, {
-            subtree: true,
-            childList: true,
-            characterData: true,
-            attributes: true,
-            attributeFilter: ['src', 'href', 'action']
-        });
-        
-        
-        while (treeWalker.nextNode()) {
-            if (treeWalker.currentNode.tagName==null){
-                continue
-            }
-            if (FilterTags.indexOf(treeWalker.currentNode.tagName)<0) {
-                NodeArrays.push(treeWalker.currentNode)
-            } 
-        }
-        
-        while (NodeArrays.length!=0){
-            var node = NodeArrays.shift();
-            console.log(node.tagName)
-            console.log("NodeArrays len: ", NodeArrays.length)
-            if (node==null){
-                continue
-            }
-            node.style.color="red";
-            // 如果是input 输入的也要先判断是什么类型的然后输入
-            if (node.tagName=="INPUT" &&  node.type=="text" || node.tagName=="INPUT" &&  node.type=="password"  || node.tagName=="INPUT" &&  node.type=="email"  || node.tagName=="INPUT" &&  node.type=="tel"){
-                console.log(node.type)
-                if (node.type=="text"){
-                    node.textContent = username
-                    node.nodeValue = username
-                    node.setRangeText(username)
-                }else if(node.type=="password") {
-                    node.textContent = password
-                    node.nodeValue = password
-                    node.setRangeText(password)
-                }else if (node.type=="email"){
-                    node.textContent = email
-                    node.nodeValue = email
-                    node.setRangeText(email)
-                }else if (node.type=="tel"){
-                    node.textContent = phone
-                    node.nodeValue = phone
-                    node.setRangeText(phone)
-                }
+    });
+    observer.observe(document, {subtree:true, childList:true});
 
-            }else if (node.tagName == "A"){
-                // A标签有url
-                if (node.attributes.href && node.attributes.href.nodeValue){
-                    console.log(node.attributes.href.nodeValue)
-                    if (node.attributes.href.nodeValue.indexOf("javascript")==-1 && node.attributes.href.nodeValue!="#"){
-                        // url
-                        console.log("push -> ",node.attributes.href.nodeValue)
-                        HrefArrays.push(node.attributes.href.nodeValue)
-                    }else{
-                        // javascript
-                        filterClick(node);
-                        await sleep(slow);
-                    }
-                }
-
-            }else if (node.tagName=="INPUT" &&  node.type=="submit" || node.tagName=="BUTTON" || node.tagName=="INPUT" &&  node.type=="button"){
-                filterClick(node);
-                await sleep(slow);
-
-            }
-        }
-        // 返回匹配到所有的url
-        console.log(HrefArrays)
-        return HrefArrays
+    const walker = document.createTreeWalker(document, NodeFilter.SHOW_ELEMENT, null);
+    while (walker.nextNode()) {
+        enqueueNode(walker.currentNode);
     }
-    console.log("start run auto")
-    return auto ();
-}   
+
+    async function auto(){
+        while (queue.length && actions < actionLimit) {
+            const node = queue.shift();
+            try {
+                await processNode(node);
+            } catch(err) {
+                console.log('auto error', err);
+            }
+            actions++;
+        }
+        observer.disconnect();
+        return Array.from(queuedUrls);
+    }
+    return auto();
+}
 `
 
 func Auto(page *rod.Page) []string {

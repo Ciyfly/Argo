@@ -13,12 +13,6 @@ import (
 
 // 泛化去重
 
-var PendingNormalizeQueue chan *PendingUrl
-var NormalizeCloseChan chan int
-var NormalizeCloseChanFlag bool
-var NormalizeationResultMap map[string]int
-var NormalizeationStaticMap map[string]int
-
 type PendingUrl struct {
 	URL             string
 	Method          string
@@ -31,29 +25,29 @@ type PendingUrl struct {
 	RequestStr      string
 }
 
-func InitNormalize() {
-	PendingNormalizeQueue = make(chan *PendingUrl, 100)
-	NormalizeCloseChan = make(chan int)
-	NormalizeationResultMap = make(map[string]int)
-	NormalizeationStaticMap = make(map[string]int)
-	NormalizeCloseChanFlag = false
-	go normalizeWork()
+func (ei *EngineInfo) InitNormalize() {
+	ei.PendingNormalizeQueue = make(chan *PendingUrl, 100)
+	ei.NormalizeCloseChan = make(chan int)
+	ei.NormalizeationResultMap = make(map[string]int)
+	ei.NormalizeationStaticMap = make(map[string]int)
+	ei.NormalizeCloseChanFlag = false
+	go ei.normalizeWork()
 }
 
-func pushpendingNormalizeQueue(pu *PendingUrl) {
+func (ei *EngineInfo) pushPendingNormalizeQueue(pu *PendingUrl) {
 	// 管道关闭了就不发送数据了
-	if NormalizeCloseChanFlag {
+	if ei.NormalizeCloseChanFlag {
 		return
 	}
-	PendingNormalizeQueue <- pu
+	ei.PendingNormalizeQueue <- pu
 }
 
-func normalizeWork() {
+func (ei *EngineInfo) normalizeWork() {
 	// 泛化管道 接收流量劫持的
 	for {
-		data, close := <-PendingNormalizeQueue
-		if !close {
-			NormalizeCloseChan <- 0
+		data, ok := <-ei.PendingNormalizeQueue
+		if !ok {
+			ei.NormalizeCloseChan <- 0
 			return
 		}
 		// 获取后缀
@@ -65,9 +59,9 @@ func normalizeWork() {
 		}
 		if !filterStatic(urlStr) {
 			value := normalizeation(urlStr, data.Method)
-			if _, ok := NormalizeationResultMap[value]; !ok {
-				NormalizeationResultMap[value] = 0
-				pushResult(data)
+			if _, ok := ei.NormalizeationResultMap[value]; !ok {
+				ei.NormalizeationResultMap[value] = 0
+				ei.pushResult(data)
 			}
 		}
 	}
@@ -137,21 +131,21 @@ func normalizeation(target, method string) string {
 	return utils.GetMD5(normalizeStr)
 }
 
-func urlIsExists(target string) bool {
+func (ei *EngineInfo) urlIsExists(target string) bool {
 	// 用来给 静态url 判断的
 	value := normalizeation(target, "GET")
-	if _, ok := NormalizeationStaticMap[value]; !ok {
-		NormalizeationStaticMap[value] = 0
+	if _, ok := ei.NormalizeationStaticMap[value]; !ok {
+		ei.NormalizeationStaticMap[value] = 0
 		return false
 	}
 	return true
 }
 
-func CloseNormalizeQueue() {
-	NormalizeCloseChanFlag = true
-	close(PendingNormalizeQueue)
+func (ei *EngineInfo) CloseNormalizeQueue() {
+	ei.NormalizeCloseChanFlag = true
+	close(ei.PendingNormalizeQueue)
 }
 
-func PendingNormalizeQueueEmpty() {
-	<-NormalizeCloseChan
+func (ei *EngineInfo) PendingNormalizeQueueEmpty() {
+	<-ei.NormalizeCloseChan
 }

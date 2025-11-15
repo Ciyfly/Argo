@@ -7,3 +7,5 @@ argo
 *.py
 .idea
 result
+bin/
+build/

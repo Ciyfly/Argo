@@ -1,23 +1,30 @@
 package main
 
 import (
+	"encoding/json"
+	"net/http"
+	_ "net/http/pprof"
+	"os"
+	"os/signal"
+	"sync"
+	"syscall"
+
 	"argo/pkg/conf"
 	"argo/pkg/engine"
 	"argo/pkg/log"
 	"argo/pkg/req"
 	"argo/pkg/updateself"
 	"fmt"
-	"os"
-	"os/signal"
-	"syscall"
-
-	"net/http"
-	_ "net/http/pprof"
 
 	cli "github.com/urfave/cli/v2"
 )
 
 var Version = "v1.0"
+
+var metricsRegistry = struct {
+	sync.RWMutex
+	data map[string]engine.MetricsSummary
+}{data: make(map[string]engine.MetricsSummary)}
 
 func SetupCloseHandler() {
 	c := make(chan os.Signal)
@@ -44,6 +51,7 @@ func main() {
 	// 	http.ListenAndServe("0.0.0.0:6060", nil)
 	// }()
 	SetupCloseHandler()
+	http.HandleFunc("/metrics", metricsHandler)
 	app := cli.NewApp()
 	app.Name = "argo"
 	app.Authors = []*cli.Author{&cli.Author{Name: "Recar", Email: "https://github.com/Ciyfly"}}
@@ -151,6 +159,18 @@ func main() {
 			Usage:    "Specify the Chrome executable path, e.g. --chrome /opt/google/chrome/chrome",
 			Category: ConfigArgsGroup,
 		},
+		&cli.IntFlag{
+			Name:     "queuesize",
+			Value:    100000,
+			Usage:    "Maximum pending URL queue length before dropping.",
+			Category: ConfigArgsGroup,
+		},
+		&cli.IntFlag{
+			Name:     "scheduleinterval",
+			Value:    0,
+			Usage:    "Interval in milliseconds between launching new tabs (0 for unlimited).",
+			Category: ConfigArgsGroup,
+		},
 		&cli.StringFlag{
 			Name:     "save",
 			Usage:    "Result saved as 'target' by default. Use '--save test' to save as 'test'.",
@@ -159,6 +179,11 @@ func main() {
 		&cli.StringFlag{
 			Name:     "outputdir",
 			Usage:    "save output to directory",
+			Category: OutPutArgsGroup,
+		},
+		&cli.StringFlag{
+			Name:     "metricsfile",
+			Usage:    "write crawl metrics summary to this JSON file",
 			Category: OutPutArgsGroup,
 		},
 		&cli.BoolFlag{
@@ -170,8 +195,18 @@ func main() {
 		&cli.StringFlag{
 			Name:     "format",
 			Value:    "txt,json",
-			Usage:    "Output format separated by commas, txt, json, xlsx, html supported.",
+			Usage:    "Output formats separated by commas, e.g. txt,json,xlsx,html,jsonl.",
 			Category: OutPutArgsGroup,
+		},
+		&cli.StringFlag{
+			Name:     "interactions",
+			Usage:    "Comma separated interaction plugins order",
+			Category: ConfigArgsGroup,
+		},
+		&cli.StringFlag{
+			Name:     "middlewares",
+			Usage:    "Comma separated page middleware order",
+			Category: ConfigArgsGroup,
 		},
 		&cli.BoolFlag{
 			Name:     "debug",
@@ -237,18 +272,72 @@ func RunMain(c *cli.Context) error {
 	go func() {
 		http.ListenAndServe("0.0.0.0:5208", nil)
 	}()
+	var wg sync.WaitGroup
+	errChan := make(chan error, len(conf.GlobalConfig.TargetList))
+	metricsChan := make(chan engine.MetricsSummary, len(conf.GlobalConfig.TargetList))
 	for _, t := range conf.GlobalConfig.TargetList {
-		log.Logger.Infof("target: %s", t)
-		if !req.CheckTarget(t) {
-			log.Logger.Errorf("The target is inaccessible %s", t)
+		target := t
+		log.Logger.Infof("target: %s", target)
+		if !req.CheckTarget(target) {
+			log.Logger.Errorf("The target is inaccessible %s", target)
 			continue
 		}
-		// 创建一个结构体 里面没有浏览器 因为每个tab就是一个浏览器 只有目标和options
-		// 然后启动 多个浏览器 每个浏览器开一个tab页面
-		// 跟之前一样 tab里加浏览器 阻塞条件变成 第一个访问完 url没有值等 超时关闭tab和浏览器
-		eif := engine.InitEngine(t)
-		eif.Start()
-
+		wg.Add(1)
+		go func(target string) {
+			defer wg.Done()
+			eif := engine.InitEngine(target)
+			if err := eif.Start(); err != nil {
+				errChan <- fmt.Errorf("target %s: %w", target, err)
+			}
+			summary := eif.MetricsSummary()
+			recordMetrics(summary)
+			metricsChan <- summary
+		}(target)
 	}
-	return nil
+	wg.Wait()
+	close(errChan)
+	close(metricsChan)
+	var firstErr error
+	for err := range errChan {
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	metrics := make([]engine.MetricsSummary, 0, len(conf.GlobalConfig.TargetList))
+	for m := range metricsChan {
+		metrics = append(metrics, m)
+	}
+	if conf.GlobalConfig.MetricsFile != "" {
+		if err := writeMetricsFile(conf.GlobalConfig.MetricsFile, metrics); err != nil {
+			log.Logger.Errorf("write metrics file err: %s", err)
+		}
+	}
+	return firstErr
+}
+
+func writeMetricsFile(path string, data []engine.MetricsSummary) error {
+	content, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, content, 0644)
+}
+
+func recordMetrics(summary engine.MetricsSummary) {
+	metricsRegistry.Lock()
+	metricsRegistry.data[summary.Target] = summary
+	metricsRegistry.Unlock()
+}
+
+func metricsHandler(w http.ResponseWriter, r *http.Request) {
+	metricsRegistry.RLock()
+	resp := make([]engine.MetricsSummary, 0, len(metricsRegistry.data))
+	for _, v := range metricsRegistry.data {
+		resp = append(resp, v)
+	}
+	metricsRegistry.RUnlock()
+	w.Header().Set("Content-Type", "application/json")
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	enc.Encode(resp)
 }

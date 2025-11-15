@@ -30,9 +30,13 @@ browser:
   tabtimeout: 30 # tab页面最长时间
   browsertimeout: 18000 # 浏览器运行最长时间
   maxdepth: 10 # 爬行最大深度
+  queue_size: 100000 # URL 队列最大长度
+  schedule_interval: 0 # 每次调度 Tab 的间隔(ms)，0 表示不限速
 auto:
   slow: 1000 # 事件触发的延迟时间
   filter: ["lougout", "登出", "reset"] # 包含这种字符的就不进行触发事件
+  interactions: ["login", "playback", "auto"]
+  middlewares: ["static", "interaction", "metrics"]
 
 `
 
@@ -48,6 +52,7 @@ type Conf struct {
 	Dev              bool
 	NoReqRspStr      bool
 	Quiet            bool
+	MetricsFile      string
 }
 
 // 保存的格式
@@ -55,6 +60,7 @@ type ResultConf struct {
 	OutputDir string
 	Format    string
 	Name      string
+	MQ        MQConf
 }
 
 // 默认的用户名密码
@@ -67,20 +73,24 @@ type LoginConf struct {
 
 // 浏览器参数
 type BrowserConf struct {
-	UnHeadless     bool   `yaml:"unheadless"`
-	Trace          bool   `yaml:"trace"`
-	TabCount       int    `yaml:"tab_count"`
-	Proxy          string `yaml:"proxy"`
-	TabTimeout     int    `yaml:"tab_timeout"`
-	BrowserTimeout int    `yaml:"browser_timeout"`
-	MaxDepth       int    `yaml:"max_depth"`
-	Chrome         string `yaml:"chrome"`
+	UnHeadless       bool   `yaml:"unheadless"`
+	Trace            bool   `yaml:"trace"`
+	TabCount         int    `yaml:"tab_count"`
+	Proxy            string `yaml:"proxy"`
+	TabTimeout       int    `yaml:"tab_timeout"`
+	BrowserTimeout   int    `yaml:"browser_timeout"`
+	MaxDepth         int    `yaml:"max_depth"`
+	Chrome           string `yaml:"chrome"`
+	QueueSize        int    `yaml:"queue_size"`
+	ScheduleInterval int    `yaml:"schedule_interval"`
 }
 
 // auto 自动触发的一些参数
 type AutoConf struct {
-	Slow   float64  `yaml:"slow"`
-	Filter []string `yaml:"filter"`
+	Slow         float64  `yaml:"slow"`
+	Filter       []string `yaml:"filter"`
+	Interactions []string `yaml:"interactions"`
+	Middlewares  []string `yaml:"middlewares"`
 }
 
 func readYamlConfig(configFile string) {
@@ -147,6 +157,9 @@ func MergeArgs(c *cli.Context) {
 	save := c.String("save")
 	format := c.String("format")
 	outputDir := c.String("outputdir")
+	interactionsArg := c.String("interactions")
+	middlewaresArg := c.String("middlewares")
+	metricsFile := c.String("metricsfile")
 
 	//静默输出
 	quiet := c.Bool("quiet")
@@ -156,6 +169,8 @@ func MergeArgs(c *cli.Context) {
 	// 优化控制
 	norrs := c.Bool("norrs")
 	maxDepth := c.Int("maxdepth")
+	queueSize := c.Int("queuesize")
+	scheduleInterval := c.Int("scheduleinterval")
 
 	// 目标
 	if target != "" {
@@ -208,6 +223,12 @@ func MergeArgs(c *cli.Context) {
 	if chrome != GlobalConfig.BrowserConf.Chrome {
 		GlobalConfig.BrowserConf.Chrome = chrome
 	}
+	if queueSize != 0 {
+		GlobalConfig.BrowserConf.QueueSize = queueSize
+	}
+	if scheduleInterval != 0 {
+		GlobalConfig.BrowserConf.ScheduleInterval = scheduleInterval
+	}
 	// 登录参数
 	if username != GlobalConfig.LoginConf.Username {
 		GlobalConfig.LoginConf.Username = username
@@ -226,6 +247,13 @@ func MergeArgs(c *cli.Context) {
 	GlobalConfig.ResultConf.Name = save
 	GlobalConfig.ResultConf.Format = format
 	GlobalConfig.ResultConf.OutputDir = outputDir
+	GlobalConfig.MetricsFile = metricsFile
+	if interactionsArg != "" {
+		GlobalConfig.AutoConf.Interactions = parseList(interactionsArg)
+	}
+	if middlewaresArg != "" {
+		GlobalConfig.AutoConf.Middlewares = parseList(middlewaresArg)
+	}
 
 	//dev
 	GlobalConfig.Dev = devMode
@@ -237,4 +265,22 @@ func MergeArgs(c *cli.Context) {
 	GlobalConfig.NoReqRspStr = norrs
 	GlobalConfig.BrowserConf.MaxDepth = maxDepth
 
+}
+
+func parseList(input string) []string {
+	parts := strings.Split(input, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		trim := strings.TrimSpace(p)
+		if trim != "" {
+			result = append(result, trim)
+		}
+	}
+	return result
+}
+
+type MQConf struct {
+	Type      string `yaml:"type"`
+	Address   string `yaml:"address"`
+	QueueName string `yaml:"queue"`
 }

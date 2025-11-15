@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -43,6 +44,42 @@ type EngineInfo struct {
 	Page404PageURl     string
 	Page404Vector      vector.Vector
 	Page404Dict        map[string]int
+
+	Scheduler *Scheduler
+
+	ResultHtmlData *HtmlData
+	ResultList     []*PendingUrl
+	ResultQueue    chan *PendingUrl
+	ResultSinks    map[string]ResultSink
+
+	PendingNormalizeQueue   chan *PendingUrl
+	NormalizeCloseChan      chan int
+	NormalizeCloseChanFlag  bool
+	NormalizeationResultMap map[string]int
+	NormalizeationStaticMap map[string]int
+
+	Interactions    []Interaction
+	PageMiddlewares []PageMiddleware
+	PagesProcessed  int64
+	UrlsDropped     int64
+	TabsTimeout     int64
+	eventHandlersMu sync.RWMutex
+	eventHandlers   []func(EngineEvent)
+}
+
+type MetricsSummary struct {
+	Target         string `json:"target"`
+	PagesProcessed int64  `json:"pages_processed"`
+	UrlsDropped    int64  `json:"urls_dropped"`
+	TabsTimeout    int64  `json:"tabs_timeout"`
+	ResultCount    int    `json:"result_count"`
+}
+
+type EngineEvent struct {
+	Type      string                 `json:"type"`
+	Target    string                 `json:"target"`
+	Timestamp time.Time              `json:"timestamp"`
+	Data      map[string]interface{} `json:"data,omitempty"`
 }
 
 type UrlInfo struct {
@@ -58,16 +95,18 @@ func InitEngine(target string) *EngineInfo {
 	inject.LoadScript()
 	// 初始化 登录插件
 	login.InitLoginAuto()
-	// 初始化 泛化模块
-	InitNormalize()
-	// 初始化 结果处理模块
-	InitResultHandler()
 	// 初始化静态资源过滤
 	InitFilter()
 	// 初始化浏览器
 	engineInfo := InitEngineInfo(target)
-	// 初始化tab控制携程池
-	engineInfo.InitTabPool()
+	// 初始化泛化模块
+	engineInfo.InitNormalize()
+	// 初始化 结果处理模块
+	engineInfo.InitResultHandler()
+	// 初始化调度器
+	engineInfo.InitScheduler()
+	engineInfo.InitInteractions()
+	engineInfo.InitPipeline()
 	return engineInfo
 }
 
@@ -120,7 +159,12 @@ func InitEngineInfo(target string) *EngineInfo {
 	}
 }
 
-func (ei *EngineInfo) Start() {
+func (ei *EngineInfo) InitScheduler() {
+	ei.Scheduler = NewScheduler(ei)
+	ei.Scheduler.Start()
+}
+
+func (ei *EngineInfo) Start() error {
 	if conf.GlobalConfig.BrowserConf.Proxy != "" {
 		log.Logger.Debugf("proxy: %s", conf.GlobalConfig.BrowserConf.Proxy)
 	}
@@ -136,18 +180,18 @@ func (ei *EngineInfo) Start() {
 		log.Logger.Debugf("metadata parse: %s", staticUrl)
 		go func(staticUrl string) {
 			defer metadataWg.Done()
-			PushStaticUrl(&UrlInfo{Url: staticUrl, SourceType: "metadata parse", SourceUrl: "robots.txt|sitemap.xml", Depth: 0})
+			ei.PushStaticUrl(&UrlInfo{Url: staticUrl, SourceType: "metadata parse", SourceUrl: "robots.txt|sitemap.xml", Depth: 0})
 		}(staticUrl)
 	}
 	// 等待 metadata 爬取完成
 	metadataWg.Wait()
 	// 打开第一个tab页面 这里应该提交url管道任务
 	// go ei.NewTab(&UrlInfo{Url: ei.Target, Depth: 0, SourceType: "homePage", SourceUrl: "target"}, HOME_PAGE_FLAG)
-	PushStaticUrl(&UrlInfo{Url: ei.Target, Depth: 0, SourceType: "homePage", SourceUrl: "target"})
+	ei.PushStaticUrl(&UrlInfo{Url: ei.Target, Depth: 0, SourceType: "homePage", SourceUrl: "target"})
 	page404url := ei.Target + "/" + utils.GenRandStr()
 	ei.Page404PageURl = page404url
 	// go ei.NewTab(&UrlInfo{Url: page404url, Depth: 0, SourceType: "404", SourceUrl: "404"}, RANDPAGE404_FLAG)
-	PushStaticUrl(&UrlInfo{Url: page404url, Depth: 0, SourceType: "404", SourceUrl: "404"})
+	ei.PushStaticUrl(&UrlInfo{Url: page404url, Depth: 0, SourceType: "404", SourceUrl: "404"})
 	// dev模式的时候不会结束 为了从浏览器界面调试查看需要手动关闭
 	if conf.GlobalConfig.Dev {
 		log.Logger.Warn("!!! dev mode please ctrl +c kill !!!")
@@ -156,6 +200,77 @@ func (ei *EngineInfo) Start() {
 	// 结束
 	ei.Finish()
 	ei.SaveResult()
+	return nil
+}
+
+func (ei *EngineInfo) PushStaticUrl(uif *UrlInfo) {
+	if ei.Scheduler == nil || uif == nil {
+		return
+	}
+	ei.Scheduler.Submit(uif)
+	ei.EmitEvent(EngineEvent{Type: "url_submit", Target: uif.Url, Timestamp: time.Now(), Data: map[string]interface{}{"source": uif.SourceType}})
+}
+
+func (ei *EngineInfo) InitPipeline() {
+	order := conf.GlobalConfig.AutoConf.Middlewares
+	if len(order) == 0 {
+		order = []string{"static", "interaction", "metrics"}
+	}
+	ei.PageMiddlewares = make([]PageMiddleware, 0, len(order))
+	for _, name := range order {
+		if factory, ok := middlewareRegistry[name]; ok {
+			ei.PageMiddlewares = append(ei.PageMiddlewares, factory())
+		} else {
+			log.Logger.Warnf("middleware %s not found", name)
+		}
+	}
+	if len(ei.PageMiddlewares) == 0 {
+		ei.PageMiddlewares = []PageMiddleware{
+			&staticParseMiddleware{},
+			&interactionMiddleware{},
+			&metricsMiddleware{},
+		}
+	}
+}
+
+func (ei *EngineInfo) runPageMiddlewares(ctx *PageContext) {
+	for _, middleware := range ei.PageMiddlewares {
+		if err := middleware.Handle(ctx); err != nil {
+			log.Logger.Warnf("middleware %s err: %s", middleware.Name(), err)
+		}
+	}
+}
+
+func (ei *EngineInfo) RecordPageProcessed(uif *UrlInfo) {
+	atomic.AddInt64(&ei.PagesProcessed, 1)
+}
+
+func (ei *EngineInfo) MetricsSummary() MetricsSummary {
+	return MetricsSummary{
+		Target:         ei.Target,
+		PagesProcessed: atomic.LoadInt64(&ei.PagesProcessed),
+		UrlsDropped:    atomic.LoadInt64(&ei.UrlsDropped),
+		TabsTimeout:    atomic.LoadInt64(&ei.TabsTimeout),
+		ResultCount:    len(ei.ResultList),
+	}
+}
+
+func (ei *EngineInfo) SubscribeEvents(handler func(EngineEvent)) {
+	if handler == nil {
+		return
+	}
+	ei.eventHandlersMu.Lock()
+	ei.eventHandlers = append(ei.eventHandlers, handler)
+	ei.eventHandlersMu.Unlock()
+}
+
+func (ei *EngineInfo) EmitEvent(evt EngineEvent) {
+	ei.eventHandlersMu.RLock()
+	handlers := append([]func(EngineEvent){}, ei.eventHandlers...)
+	ei.eventHandlersMu.RUnlock()
+	for _, handler := range handlers {
+		go handler(evt)
+	}
 }
 
 func (ei *EngineInfo) AddBrowser(browser *rod.Browser, options *launcher.Launcher) {
@@ -191,11 +306,8 @@ func (ei *EngineInfo) Finish() {
 		<-ei.FirstPageCloseChan
 		log.Logger.Debug("------------------------first page over------------------------")
 		// url队列为空 没有新增的url需要测试了
-		urlsQueueEmpty()
-		log.Logger.Debug("------------------------urlsQueueEmpty over------------------------")
-		// tab 的协程都完成了
-		TabWg.Wait()
-		log.Logger.Debug("------------------------tabPool over------------------------")
+		ei.waitSchedulerIdle()
+		log.Logger.Debug("------------------------scheduler idle------------------------")
 		taskOverChan <- true
 	}()
 	select {
@@ -207,7 +319,8 @@ func (ei *EngineInfo) Finish() {
 		ei.Close()
 	}
 	log.Logger.Debug("------------------------Close NormalizeQueue------------------------")
-	CloseNormalizeQueue()
+	ei.CloseNormalizeQueue()
+	ei.PendingNormalizeQueueEmpty()
 }
 
 func (ei *EngineInfo) Close() {
@@ -224,6 +337,14 @@ func (ei *EngineInfo) Close() {
 		}
 	}
 
+}
+
+func (ei *EngineInfo) waitSchedulerIdle() {
+	if ei.Scheduler == nil {
+		return
+	}
+	ei.Scheduler.WaitQueueEmpty()
+	ei.Scheduler.WaitTabs()
 }
 
 func copyBody(b io.ReadCloser) (r1, r2 io.ReadCloser, err error) {

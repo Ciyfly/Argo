@@ -9,6 +9,7 @@ import (
 	"argo/pkg/utils"
 	"argo/pkg/vector"
 	"bytes"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -435,4 +436,31 @@ func (ei *EngineInfo) RecordTimeoutReason(stage string) {
 		ei.TimeoutReasons = make(map[string]int)
 	}
 	ei.TimeoutReasons[stage]++
+}
+
+func (ei *EngineInfo) getPageInfoWithRetry(page *rod.Page, url string) (*proto.TargetTargetInfo, error) {
+	timeout := time.Duration(conf.GlobalConfig.BrowserConf.TabTimeout/2) * time.Second
+	if timeout < 5*time.Second {
+		timeout = 5 * time.Second
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		var info *proto.TargetTargetInfo
+		var err error
+		done := make(chan struct{})
+		go func() {
+			info, err = utils.GetPageInfoByPage(page)
+			close(done)
+		}()
+		select {
+		case <-done:
+			if err == nil {
+				return info, nil
+			}
+		case <-time.After(timeout):
+			err = fmt.Errorf("getPageInfo timeout after %s", timeout)
+		}
+		log.Logger.Warnf("getPageInfo retry %s attempt=%d err=%v", url, attempt+1, err)
+		page.Reload()
+	}
+	return utils.GetPageInfoByPage(page)
 }

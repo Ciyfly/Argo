@@ -62,6 +62,9 @@ mkdir -p "$OUTPUT_DIR"
 for platform in "${PLATFORMS[@]}"; do
   IFS='/' read -r GOOS GOARCH <<< "$platform"
   BIN_NAME="argo-$GOOS-$GOARCH"
+  if [[ "$GOOS" == "windows" ]]; then
+    BIN_NAME+=".exe"
+  fi
   echo -e "\033[34m[build] Building for $GOOS/$GOARCH\033[0m"
   env GOOS="$GOOS" GOARCH="$GOARCH" go build -ldflags "-X main.Version=dev" -o "$OUTPUT_DIR/$BIN_NAME" cmd/argo.go
   echo -e "\033[32m[build] Output -> $OUTPUT_DIR/$BIN_NAME\033[0m"

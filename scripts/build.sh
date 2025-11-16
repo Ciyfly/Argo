@@ -11,6 +11,8 @@ Usage: $0 [options]
 
 Options:
   -p, --platforms, -h   Comma separated GOOS/GOARCH list (default: linux/amd64)
+                         Common values: linux/amd64, linux/arm64, darwin/amd64,
+                         darwin/arm64, windows/amd64
   -o, --output          Output directory (default: bin)
       --help            Show this message
 

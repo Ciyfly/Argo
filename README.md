@@ -185,6 +185,8 @@ http://192.168.192.128:8080/
 
 可配合 `-o dist` 自定义输出目录。
 
+常见平台写法：`linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`, `windows/amd64`。
+
 
 ### debug输出
 

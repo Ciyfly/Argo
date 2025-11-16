@@ -175,6 +175,16 @@ http://192.168.192.128:8080/
 ./argo -t http://192.168.192.128:8080/  --update
 ```
 
+### 多平台构建
+
+使用 `scripts/build.sh` 可以构建不同平台的可执行文件，`-h`（或 `-p`/`--platforms`）接受逗号分隔的 `GOOS/GOARCH` 列表，例如同时输出 Linux 与 Windows 版本：
+
+```
+./scripts/build.sh -h linux/amd64,windows/amd64
+```
+
+可配合 `-o dist` 自定义输出目录。
+
 
 ### debug输出
 

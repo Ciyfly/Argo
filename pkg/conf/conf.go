@@ -50,10 +50,12 @@ type Conf struct {
 	PlaybackPath     string
 	TestPlayBack     bool
 	TargetList       []string
+	SeedList         []string
 	Dev              bool
 	NoReqRspStr      bool
 	Quiet            bool
 	MetricsFile      string
+	SeedOutput       string
 }
 
 // 保存的格式
@@ -138,11 +140,13 @@ func LoadConfig() {
 		readYamlConfig(initConfigPath)
 	}
 	GlobalConfig.TargetList = make([]string, 0)
+	GlobalConfig.SeedList = make([]string, 0)
 }
 
 func MergeArgs(c *cli.Context) {
 	target := c.String("target")
 	targetsFile := c.String("targetsfile")
+	seedFile := c.String("seedfile")
 	unheadless := c.Bool("unheadless")
 	trace := c.Bool("entrace")
 	slow := c.Float64("slow")
@@ -161,6 +165,7 @@ func MergeArgs(c *cli.Context) {
 	save := c.String("save")
 	format := c.String("format")
 	outputDir := c.String("outputdir")
+	seedOutput := c.String("seedout")
 	interactionsArg := c.String("interactions")
 	middlewaresArg := c.String("middlewares")
 	metricsFile := c.String("metricsfile")
@@ -203,6 +208,11 @@ func MergeArgs(c *cli.Context) {
 			}
 		} else {
 			log.Logger.Errorf("targetsfile not exist: %s", targetsFile)
+		}
+	}
+	if seedFile != "" {
+		if err := loadSeedFile(seedFile); err != nil {
+			log.Logger.Warnf("seedfile load err: %s", err)
 		}
 	}
 	// 浏览器参数
@@ -255,6 +265,7 @@ func MergeArgs(c *cli.Context) {
 	GlobalConfig.ResultConf.Name = save
 	GlobalConfig.ResultConf.Format = format
 	GlobalConfig.ResultConf.OutputDir = outputDir
+	GlobalConfig.SeedOutput = seedOutput
 	GlobalConfig.MetricsFile = metricsFile
 	if interactionsArg != "" {
 		GlobalConfig.AutoConf.Interactions = parseList(interactionsArg)
@@ -288,6 +299,26 @@ func parseList(input string) []string {
 		}
 	}
 	return result
+}
+
+func loadSeedFile(seedPath string) error {
+	if !utils.IsExist(seedPath) {
+		return fmt.Errorf("seedfile not exist: %s", seedPath)
+	}
+	file, err := os.Open(seedPath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		GlobalConfig.SeedList = append(GlobalConfig.SeedList, line)
+	}
+	return scanner.Err()
 }
 
 type MQConf struct {

@@ -46,6 +46,9 @@ type EngineInfo struct {
 	MaxRetries         int
 	Page404Samples     []vector.Vector
 	Page404Dict        map[string]int
+	httpClient         *http.Client
+	resourceVisited    map[string]struct{}
+	resourceMu         sync.Mutex
 
 	Scheduler *Scheduler
 
@@ -164,6 +167,8 @@ func InitEngineInfo(target string) *EngineInfo {
 		Host:               u.Host,
 		HostName:           u.Hostname(),
 		Page404Dict:        make(map[string]int),
+		httpClient:         &http.Client{Timeout: 10 * time.Second},
+		resourceVisited:    make(map[string]struct{}),
 	}
 }
 
@@ -197,6 +202,13 @@ func (ei *EngineInfo) Start() error {
 	}
 	// 等待 metadata 爬取完成
 	metadataWg.Wait()
+
+	for _, seed := range conf.GlobalConfig.SeedList {
+		if seed == "" {
+			continue
+		}
+		ei.PushStaticUrl(&UrlInfo{Url: seed, SourceType: "seed", SourceUrl: "seedfile", Depth: 0})
+	}
 	// 打开第一个tab页面 这里应该提交url管道任务
 	// go ei.NewTab(&UrlInfo{Url: ei.Target, Depth: 0, SourceType: "homePage", SourceUrl: "target"}, HOME_PAGE_FLAG)
 	ei.PushStaticUrl(&UrlInfo{Url: ei.Target, Depth: 0, SourceType: "homePage", SourceUrl: "target"})

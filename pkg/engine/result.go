@@ -137,10 +137,40 @@ func (ei *EngineInfo) SaveResult() {
 		}
 		log.Logger.Infof("[   save   ] %s", filePath)
 	}
+	if conf.GlobalConfig.SeedOutput != "" {
+		writeSeeds(conf.GlobalConfig.SeedOutput, ei.ResultList)
+	}
 	if ei.ResultQueue != nil {
 		close(ei.ResultQueue)
 	}
 	ei.logMetrics()
+}
+
+func writeSeeds(path string, results []*PendingUrl) {
+	if len(results) == 0 {
+		return
+	}
+	seen := make(map[string]struct{}, len(results))
+	lines := make([]string, 0, len(results))
+	for _, item := range results {
+		if item == nil || item.URL == "" {
+			continue
+		}
+		url := item.URL
+		if _, ok := seen[url]; ok {
+			continue
+		}
+		seen[url] = struct{}{}
+		lines = append(lines, url)
+	}
+	if len(lines) == 0 {
+		return
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644); err != nil {
+		log.Logger.Warnf("write seed file err: %s", err)
+	} else {
+		log.Logger.Infof("[ seed save ] %s", path)
+	}
 }
 
 func (ei *EngineInfo) logMetrics() {

@@ -61,6 +61,7 @@ func (s *staticParseMiddleware) Handle(ctx *PageContext) error {
 	if staticUrls != nil {
 		for _, staticUrl := range staticUrls {
 			ctx.Engine.PushStaticUrl(&UrlInfo{Url: staticUrl, SourceType: "static parse", SourceUrl: ctx.Url.Url, Depth: ctx.Url.Depth + 1})
+			ctx.Engine.EnrichStaticResource(staticUrl, ctx.Url.Depth+1)
 		}
 	}
 	return nil

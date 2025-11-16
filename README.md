@@ -196,6 +196,16 @@ excel表格输出结果如下
 
 ![](imgs/result_excel.jpg)
 
+### 使用 Seed URL 列表
+
+可以通过 `--seedfile seeds.txt` 将历史 URL 作为种子输入；每行一个 URL，支持注释（以 `#` 开头）。运行结束后，如需导出本轮发现的 URL，可使用 `--seedout new_seeds.txt`：
+
+```
+./argo -t https://example.com --seedfile seeds.txt --seedout new_seeds.txt
+```
+
+这样下一次扫描可以直接引用 `new_seeds.txt` 作为种子，快速覆盖之前发现的路径。
+
 ## 自定义交互与管线
 
 - `auto.interactions`：控制登录/回放/自动化脚本的执行顺序，默认值为 `[login, playback, auto]`，可以在 `configs/config.yml` 中增删项以启停某些插件，或通过 `--interactions login,auto` 临时覆盖。
@@ -203,6 +213,12 @@ excel表格输出结果如下
 - 登录交互会自动检测验证码（如腾讯防水墙、极验等），一旦命中会在 `logs/captcha/` 生成截图，同时在 CLI 中以 ASCII 形式预览并提示输入验证码；输入后会写回页面继续自动登录。若检测到滑块类验证码，则记录 `interaction:login:captcha_slider`，后续可扩展 JS 插件处理。
 - DOM 解析出的 URL 会经历统一的“清洗 → 过滤 → 绝对化”流程：`utils.CanonicalizeURL` 对原值做 HTML 实体反解与非法 scheme 过滤，并使用 `net/url.ResolveReference` 将相对路径、裸域名、`//cdn` 等转为绝对 http/https URL，同时重新编码 Query、去掉 Fragment。DEBUG 日志会输出 `url skip` 原因，便于排查。
 - 所有进入 Scheduler 的 URL 在 `PushStaticUrl` 内都会先 canonical 化并生成 hash，Scheduler 的 host 校验改为严格比对 hostname；`urlIsExists` 继续基于 hash 去重。这样“解析层 + 调度层 + normalize 层”共享同一 canonical 结果，避免重复任务和脏数据。
+- URL 扩展 TODO 列表：
+  1. 静态资源解析：针对 `.js/.json/.xml/.csv` 等文本内容做额外扫描，JS 场景需解析 fetch/ajax/router 等调用并 canonical 化输出。（已实现基础版本：静态解析器会下载同源资源，提取 `fetch/axios/router.push` 等调用中的 URL 并推送调度队列；后续可引入 AST 提升准确率。）
+  2. Headless 事件：通过 `proto.Page.AddScriptToEvaluateOnNewDocument` 注入 hook，直接把 `window.fetch/XHR/history` 的 URL push 到 Scheduler。
+  3. FormDiscovery 中间件：识别 `<form action>`，在节流/黑名单保护下自动发起 GET/POST，抓取 302/Location 中的 URL。（实现中）
+  4. Manifest/ServiceWorker：解析 `<link rel="manifest">`、`navigator.serviceWorker` 及 `urlsToCache`，纳入 URL 池。（实现中）
+  5. Seeds 机制：将历史 URL 导出为 seeds 文件，下次扫描可通过 `--seedfile` 注入，提升覆盖面。（本次实现）
 - `auto.middlewares`：声明页面处理中间件顺序，内置 `static`（静态 DOM 解析）、`interaction`（执行交互插件并回灌 URL）、`metrics`（采集指标）。可在配置或 `--middlewares static,metrics` 中调整顺序与开关。
 - `metricsfile`：通过 CLI `--metricsfile report.json` 或配置写入 JSON 汇总，字段包括 pages_processed / urls_dropped / tabs_timeout / result_count，可用于离线分析，也可以访问 `http://127.0.0.1:5208/metrics` 查看实时 JSON。
 - `browser.max_retries`：控制 Tab 超时后的重试次数（默认 2 次），也可以用 `--maxretries` 临时覆盖；渐进式超时会在前几次失败后自动重试，超过上限才彻底放弃。

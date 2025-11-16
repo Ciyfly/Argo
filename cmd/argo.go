@@ -73,6 +73,12 @@ func main() {
 			Usage:    "The file list has targets separated by new lines, like other tools we've used before.",
 			Category: UseArgsGroup,
 		},
+		&cli.StringFlag{
+			Name:     "seedfile",
+			Value:    "",
+			Usage:    "Seed URL list file (one URL per line) to bootstrap crawling.",
+			Category: UseArgsGroup,
+		},
 		&cli.BoolFlag{
 			Name:     "unheadless",
 			Aliases:  []string{"uh"},
@@ -208,6 +214,12 @@ func main() {
 			Name:     "format",
 			Value:    "txt,json",
 			Usage:    "Output formats separated by commas, e.g. txt,json,xlsx,html,jsonl.",
+			Category: OutPutArgsGroup,
+		},
+		&cli.StringFlag{
+			Name:     "seedout",
+			Value:    "",
+			Usage:    "Write discovered URLs into this file for use as future seeds.",
 			Category: OutPutArgsGroup,
 		},
 		&cli.StringFlag{

@@ -3,6 +3,7 @@ package engine
 import (
 	"argo/pkg/static"
 	"github.com/go-rod/rod"
+	"time"
 )
 
 type PageContext struct {
@@ -11,6 +12,7 @@ type PageContext struct {
 	Url           *UrlInfo
 	PageFlag      int
 	StageRecorder func(string) // StageRecorder 用于在关键步骤更新 stage 以便定位超时
+	ExtendTimeout func(time.Duration)
 }
 
 type PageMiddleware interface {
@@ -76,7 +78,7 @@ func (i *interactionMiddleware) Handle(ctx *PageContext) error {
 	if ctx.StageRecorder != nil {
 		ctx.StageRecorder("interaction_chain:start")
 	}
-	urls := ctx.Engine.runInteractions(ctx.Page, ctx.Url, ctx.PageFlag == HOME_PAGE_FLAG, ctx.StageRecorder)
+	urls := ctx.Engine.runInteractions(ctx.Page, ctx.Url, ctx.PageFlag == HOME_PAGE_FLAG, ctx.StageRecorder, ctx.ExtendTimeout)
 	for _, u := range urls {
 		ctx.Engine.PushStaticUrl(&UrlInfo{Url: u, SourceType: "interaction", SourceUrl: ctx.Url.Url, Depth: ctx.Url.Depth + 1})
 	}

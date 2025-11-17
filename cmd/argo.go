@@ -95,7 +95,19 @@ func main() {
 		&cli.Float64Flag{
 			Name:     "slow",
 			Value:    1000,
-			Usage:    "The default delay time for operating after enabling ",
+			Usage:    "Default delay per auto action (ms).",
+			Category: BrowserArgsGroup,
+		},
+		&cli.Float64Flag{
+			Name:     "slowmin",
+			Value:    0,
+			Usage:    "Minimum random delay per action (ms). 0 = use config.",
+			Category: BrowserArgsGroup,
+		},
+		&cli.Float64Flag{
+			Name:     "slowmax",
+			Value:    0,
+			Usage:    "Maximum random delay per action (ms). 0 = use config.",
 			Category: BrowserArgsGroup,
 		},
 		&cli.StringFlag{
@@ -155,8 +167,14 @@ func main() {
 		},
 		&cli.IntFlag{
 			Name:     "tabtimeout",
-			Value:    30,
-			Usage:    "Set max tab run time, close if limit exceeded. Unit is seconds.",
+			Value:    0,
+			Usage:    "Set max tab run time, close if limit exceeded. Unit is seconds. (0 = use config)",
+			Category: ConfigArgsGroup,
+		},
+		&cli.IntFlag{
+			Name:     "tabsofttimeout",
+			Value:    0,
+			Usage:    "Soft tab timeout for heartbeat extension (seconds). (0 = use config)",
 			Category: ConfigArgsGroup,
 		},
 		&cli.IntFlag{

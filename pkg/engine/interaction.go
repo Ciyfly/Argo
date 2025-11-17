@@ -19,6 +19,7 @@ type InteractionContext struct {
 	UrlInfo       *UrlInfo
 	IsHome        bool
 	StageRecorder func(string)
+	ExtendTimeout func(time.Duration)
 }
 
 type Interaction interface {
@@ -50,7 +51,29 @@ func (ei *EngineInfo) InitInteractions() {
 	}
 }
 
-func (ei *EngineInfo) runInteractions(page *rod.Page, uif *UrlInfo, isHome bool, stageRecorder func(string)) []string {
+// reorderInteractions 按优先级数组排序，缺失的按原顺序追加
+func reorderInteractions(list []Interaction, priority []string) []Interaction {
+	nameIndex := map[string]Interaction{}
+	for _, inter := range list {
+		nameIndex[inter.Name()] = inter
+	}
+	ordered := []Interaction{}
+	exists := map[string]bool{}
+	for _, name := range priority {
+		if inter, ok := nameIndex[name]; ok {
+			ordered = append(ordered, inter)
+			exists[name] = true
+		}
+	}
+	for _, inter := range list {
+		if !exists[inter.Name()] {
+			ordered = append(ordered, inter)
+		}
+	}
+	return ordered
+}
+
+func (ei *EngineInfo) runInteractions(page *rod.Page, uif *UrlInfo, isHome bool, stageRecorder func(string), extendTimeout func(time.Duration)) []string {
 	if len(ei.Interactions) == 0 || page == nil {
 		return nil
 	}
@@ -60,9 +83,17 @@ func (ei *EngineInfo) runInteractions(page *rod.Page, uif *UrlInfo, isHome bool,
 		UrlInfo:       uif,
 		IsHome:        isHome,
 		StageRecorder: stageRecorder,
+		ExtendTimeout: extendTimeout,
 	}
+
+	priority := []string{"auto", "login", "playback"}
+	if conf.GlobalConfig.PlaybackPath != "" {
+		priority = []string{"playback", "auto", "login"}
+	}
+	runOrder := reorderInteractions(ei.Interactions, priority)
+
 	var collected []string
-	for _, inter := range ei.Interactions {
+	for _, inter := range runOrder {
 		if stageRecorder != nil {
 			stageRecorder("interaction:" + inter.Name())
 		}
@@ -86,10 +117,25 @@ type loginInteraction struct{}
 func (l *loginInteraction) Name() string { return "login" }
 
 func (l *loginInteraction) Execute(ctx *InteractionContext) ([]string, error) {
-	if ctx == nil || ctx.Page == nil {
+	if ctx == nil || ctx.Page == nil || ctx.Engine == nil {
 		return nil, nil
 	}
+	executed := false
+	ctx.Engine.loginOnce.Do(func() {
+		executed = true
+		ctx.Engine.loginOnceErr = l.performLogin(ctx)
+	})
+	if !executed {
+		log.Logger.Debug("login interaction already attempted once, skip")
+		if ctx.StageRecorder != nil {
+			ctx.StageRecorder("interaction:login:skipped")
+		}
+		return nil, ctx.Engine.loginOnceErr
+	}
+	return nil, ctx.Engine.loginOnceErr
+}
 
+func (l *loginInteraction) performLogin(ctx *InteractionContext) error {
 	timeoutSec := conf.GlobalConfig.LoginConf.Timeout
 	if timeoutSec <= 0 {
 		timeoutSec = defaultLoginInteractionTimeoutSeconds
@@ -108,7 +154,7 @@ func (l *loginInteraction) Execute(ctx *InteractionContext) ([]string, error) {
 		if ctx.StageRecorder != nil {
 			ctx.StageRecorder("interaction:login:success")
 		}
-		return nil, nil
+		return nil
 	case <-time.After(timeout):
 		timeoutPage.CancelTimeout()
 		if ctx.StageRecorder != nil {
@@ -119,7 +165,7 @@ func (l *loginInteraction) Execute(ctx *InteractionContext) ([]string, error) {
 			target = ctx.UrlInfo.Url
 		}
 		log.Logger.Warnf("login interaction timeout (%ds): %s", timeoutSec, target)
-		return nil, fmt.Errorf("login interaction timeout after %ds", timeoutSec)
+		return fmt.Errorf("login interaction timeout after %ds", timeoutSec)
 	}
 }
 
@@ -140,6 +186,11 @@ type autoInteraction struct{}
 func (a *autoInteraction) Name() string { return "auto" }
 
 func (a *autoInteraction) Execute(ctx *InteractionContext) ([]string, error) {
-	urls := inject.Auto(ctx.Page)
+	extend := func(d time.Duration) {}
+	if ctx != nil && ctx.ExtendTimeout != nil {
+		extend = ctx.ExtendTimeout
+		extend(inject.EstimateAutoDuration())
+	}
+	urls := inject.Auto(ctx.Page, extend)
 	return urls, nil
 }

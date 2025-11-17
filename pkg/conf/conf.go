@@ -28,14 +28,21 @@ browser:
   trace: false # 有界面时显示点击了哪些
   tabcount: 10 # 最多开启多个tab页面
   proxy: ""
-  tabtimeout: 30 # tab页面最长时间
+  tab_soft_timeout: 60 # Tab 软超时时间，AutoJS 可据此动态续期
+  tabtimeout: 240 # Tab 硬超时时间
   browsertimeout: 18000 # 浏览器运行最长时间
   maxdepth: 10 # 爬行最大深度
+  disable_leakless: false # 仅当与安全软件冲突时再手动关闭 leakless
   queue_size: 100000 # URL 队列最大长度
   schedule_interval: 0 # 每次调度 Tab 的间隔(ms)，0 表示不限速
 auto:
-  slow: 1000 # 事件触发的延迟时间
+  slow: 1000 # 默认延迟（ms）
+  slow_min: 600 # 动作最短等待（ms），<=0 表示禁用随机
+  slow_max: 1400 # 动作最长等待（ms），<=slow_min 表示禁用随机
   filter: ["lougout", "登出", "reset"] # 包含这种字符的就不进行触发事件
+  action_limit: 200 # 单页自动动作上限
+  batch_size: 20 # 每批执行的最大动作数
+  command_timeout_ms: 800 # 等待 go 端下一步指令的超时时间(ms)
   interactions: ["login", "playback", "auto"]
   middlewares: ["static", "interaction", "metrics"]
 
@@ -81,6 +88,7 @@ type BrowserConf struct {
 	Trace            bool   `yaml:"trace"`
 	TabCount         int    `yaml:"tab_count"`
 	Proxy            string `yaml:"proxy"`
+	TabSoftTimeout   int    `yaml:"tab_soft_timeout"`
 	TabTimeout       int    `yaml:"tab_timeout"`
 	BrowserTimeout   int    `yaml:"browser_timeout"`
 	MaxDepth         int    `yaml:"max_depth"`
@@ -88,14 +96,20 @@ type BrowserConf struct {
 	QueueSize        int    `yaml:"queue_size"`
 	ScheduleInterval int    `yaml:"schedule_interval"`
 	MaxRetries       int    `yaml:"max_retries"`
+	DisableLeakless  bool   `yaml:"disable_leakless"`
 }
 
 // auto 自动触发的一些参数
 type AutoConf struct {
-	Slow         float64  `yaml:"slow"`
-	Filter       []string `yaml:"filter"`
-	Interactions []string `yaml:"interactions"`
-	Middlewares  []string `yaml:"middlewares"`
+	Slow             float64  `yaml:"slow"`
+	SlowMin          float64  `yaml:"slow_min"`
+	SlowMax          float64  `yaml:"slow_max"`
+	Filter           []string `yaml:"filter"`
+	ActionLimit      int      `yaml:"action_limit"`
+	BatchSize        int      `yaml:"batch_size"`
+	CommandTimeoutMs int      `yaml:"command_timeout_ms"`
+	Interactions     []string `yaml:"interactions"`
+	Middlewares      []string `yaml:"middlewares"`
 }
 
 func readYamlConfig(configFile string) {
@@ -229,8 +243,12 @@ func MergeArgs(c *cli.Context) {
 	if proxy != GlobalConfig.BrowserConf.Proxy {
 		GlobalConfig.BrowserConf.Proxy = proxy
 	}
-	if tabTimeout != GlobalConfig.BrowserConf.TabTimeout {
+	if tabTimeout > 0 {
 		GlobalConfig.BrowserConf.TabTimeout = tabTimeout
+	}
+	tabSoftTimeout := c.Int("tabsofttimeout")
+	if tabSoftTimeout > 0 {
+		GlobalConfig.BrowserConf.TabSoftTimeout = tabSoftTimeout
 	}
 	if browserTimeout != GlobalConfig.BrowserConf.BrowserTimeout {
 		GlobalConfig.BrowserConf.BrowserTimeout = browserTimeout
@@ -257,6 +275,12 @@ func MergeArgs(c *cli.Context) {
 	// auto
 	if slow != GlobalConfig.AutoConf.Slow {
 		GlobalConfig.AutoConf.Slow = slow
+	}
+	if slowMin := c.Float64("slowmin"); slowMin > 0 {
+		GlobalConfig.AutoConf.SlowMin = slowMin
+	}
+	if slowMax := c.Float64("slowmax"); slowMax > 0 {
+		GlobalConfig.AutoConf.SlowMax = slowMax
 	}
 	// playback
 	GlobalConfig.PlaybackPath = playback
@@ -285,6 +309,33 @@ func MergeArgs(c *cli.Context) {
 	GlobalConfig.BrowserConf.MaxDepth = maxDepth
 	if maxRetries != 0 {
 		GlobalConfig.BrowserConf.MaxRetries = maxRetries
+	}
+
+	// 自动交互默认值兜底
+	if GlobalConfig.AutoConf.ActionLimit <= 0 {
+		GlobalConfig.AutoConf.ActionLimit = 200
+	}
+	if GlobalConfig.AutoConf.BatchSize <= 0 {
+		GlobalConfig.AutoConf.BatchSize = 20
+	}
+	if GlobalConfig.AutoConf.CommandTimeoutMs <= 0 {
+		GlobalConfig.AutoConf.CommandTimeoutMs = 800
+	}
+	if GlobalConfig.AutoConf.SlowMin < 0 {
+		GlobalConfig.AutoConf.SlowMin = 0
+	}
+	if GlobalConfig.AutoConf.SlowMax < 0 {
+		GlobalConfig.AutoConf.SlowMax = 0
+	}
+	if GlobalConfig.AutoConf.SlowMax > 0 && GlobalConfig.AutoConf.SlowMin > 0 && GlobalConfig.AutoConf.SlowMax <= GlobalConfig.AutoConf.SlowMin {
+		GlobalConfig.AutoConf.SlowMax = 0
+	}
+
+	if GlobalConfig.BrowserConf.TabTimeout <= 0 {
+		GlobalConfig.BrowserConf.TabTimeout = 180
+	}
+	if GlobalConfig.BrowserConf.TabSoftTimeout <= 0 || GlobalConfig.BrowserConf.TabSoftTimeout > GlobalConfig.BrowserConf.TabTimeout {
+		GlobalConfig.BrowserConf.TabSoftTimeout = GlobalConfig.BrowserConf.TabTimeout
 	}
 
 }

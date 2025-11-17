@@ -158,6 +158,21 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 
 	// tab相关
 	tabDone := make(chan bool, 1)
+	extendTimeoutCh := make(chan time.Duration, 8)
+	var extendClosed int32
+	extendTabTimeout := func(d time.Duration) {
+		if d <= 0 || atomic.LoadInt32(&extendClosed) == 1 {
+			return
+		}
+		select {
+		case extendTimeoutCh <- d:
+		default:
+			select {
+			case extendTimeoutCh <- d:
+			default:
+			}
+		}
+	}
 	var page *rod.Page
 	var pageError error
 	var NormalDoneFlag = false
@@ -197,8 +212,11 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 		}
 		setStage("open_page")
 		page, pageError = browser.Page(proto.TargetCreateTarget{URL: uif.Url})
-		if pageError != nil {
-			page.Reload()
+		if pageError != nil || page == nil {
+			log.Logger.Errorf("open page error: %s -> %v", uif.Url, pageError)
+			setStage("open_page:failed")
+			ei.NormalCloseTab(browserInfo)
+			return
 		}
 		setStage("wait_load")
 		page.WaitLoad()
@@ -262,6 +280,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 			Url:           uif,
 			PageFlag:      pageFlag,
 			StageRecorder: setStage,
+			ExtendTimeout: extendTabTimeout,
 		}
 		setStage("middlewares:start")
 		ei.runPageMiddlewares(ctx)
@@ -298,23 +317,74 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 		setStage("wait_push_urls_done")
 
 	}() // 协程
-	// 阻塞超时控制
-	select {
-	case <-tabDone:
-		log.Logger.Debugf("[close tab ] => %s", uif.Url)
-	case <-time.After(time.Duration(conf.GlobalConfig.BrowserConf.TabTimeout) * time.Second):
-		currentStage := getStage()
-		log.Logger.Warnf("[timeout tab ] => %s stage=%s", uif.Url, currentStage)
-		if !NormalDoneFlag {
-			atomic.AddInt64(&ei.TabsTimeout, 1)
-			ei.EmitEvent(EngineEvent{Type: "tab_timeout", Target: uif.Url, Timestamp: time.Now(), Data: map[string]interface{}{"stage": currentStage}})
-			ei.RecordTimeoutReason(currentStage)
-			TimeoutDoneFlag = true
-			ei.TimeoutCloseTab(browserInfo)
-			if uif.Retries <= ei.MaxRetries {
-				log.Logger.Debugf("requeue timeout url %s retries=%d", uif.Url, uif.Retries)
-				ei.PushStaticUrl(uif)
+
+	tabHard := conf.GlobalConfig.BrowserConf.TabTimeout
+	if tabHard <= 0 {
+		tabHard = 180
+	}
+	tabSoft := conf.GlobalConfig.BrowserConf.TabSoftTimeout
+	if tabSoft <= 0 || tabSoft > tabHard {
+		tabSoft = tabHard
+	}
+	softDuration := time.Duration(tabSoft) * time.Second
+	if softDuration <= 0 {
+		softDuration = 30 * time.Second
+	}
+	hardDeadline := time.Now().Add(time.Duration(tabHard) * time.Second)
+	tabTimer := time.NewTimer(softDuration)
+	defer tabTimer.Stop()
+
+	resetTimer := func(d time.Duration) {
+		if d <= 0 {
+			d = time.Millisecond
+		}
+		if !tabTimer.Stop() {
+			select {
+			case <-tabTimer.C:
+			default:
 			}
+		}
+		tabTimer.Reset(d)
+	}
+
+	for {
+		select {
+		case <-tabDone:
+			atomic.StoreInt32(&extendClosed, 1)
+			log.Logger.Debugf("[close tab ] => %s", uif.Url)
+			return
+		case extendDur := <-extendTimeoutCh:
+			if extendDur <= 0 || atomic.LoadInt32(&extendClosed) == 1 {
+				continue
+			}
+			remaining := hardDeadline.Sub(time.Now())
+			if remaining <= 0 {
+				resetTimer(time.Millisecond)
+				continue
+			}
+			if extendDur > remaining {
+				extendDur = remaining
+			}
+			if extendDur < time.Millisecond {
+				extendDur = time.Millisecond
+			}
+			resetTimer(extendDur)
+		case <-tabTimer.C:
+			atomic.StoreInt32(&extendClosed, 1)
+			currentStage := getStage()
+			log.Logger.Warnf("[timeout tab ] => %s stage=%s", uif.Url, currentStage)
+			if !NormalDoneFlag {
+				atomic.AddInt64(&ei.TabsTimeout, 1)
+				ei.EmitEvent(EngineEvent{Type: "tab_timeout", Target: uif.Url, Timestamp: time.Now(), Data: map[string]interface{}{"stage": currentStage}})
+				ei.RecordTimeoutReason(currentStage)
+				TimeoutDoneFlag = true
+				ei.TimeoutCloseTab(browserInfo)
+				if uif.Retries <= ei.MaxRetries {
+					log.Logger.Debugf("requeue timeout url %s retries=%d", uif.Url, uif.Retries)
+					ei.PushStaticUrl(uif)
+				}
+			}
+			return
 		}
 	}
 }

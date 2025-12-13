@@ -150,6 +150,115 @@ func (b *autoBridge) handleEvent(evt autoBridgeEvent) {
 				stats.Batches = v
 			}
 		})
+
+	// 新增：框架就绪事件 - 表示JS正在等待框架渲染，需要延长超时
+	case "framework_ready":
+		b.updateStats(func(stats *autoBridgeStats) {
+			stats.BridgeEnabled = true
+		})
+		// 框架初始化完成，给予额外的处理时间
+		if waitMs, ok := readNumber(evt.Payload["wait_time_ms"]); ok && waitMs > 0 {
+			// 框架等待时间较长，给予相应的延长
+			b.extend(time.Duration(waitMs*2) * time.Millisecond)
+		} else {
+			b.extend(3 * time.Second)
+		}
+
+	// 新增：DOM重扫描事件 - 发现了新元素需要处理
+	case "dom_rescan":
+		b.updateStats(func(stats *autoBridgeStats) {
+			stats.BridgeEnabled = true
+			if v, ok := readNumber(evt.Payload["queue_total"]); ok {
+				stats.LastQueue = v
+			}
+		})
+		// 根据队列大小给予延长
+		if queueTotal, ok := readNumber(evt.Payload["queue_total"]); ok && queueTotal > 0 {
+			// 每个元素预估500ms处理时间
+			extendMs := queueTotal * 500
+			if extendMs > 30000 {
+				extendMs = 30000 // 最多延长30秒
+			}
+			b.extend(time.Duration(extendMs) * time.Millisecond)
+		}
+
+	// 新增：队列初始化事件 - 初始扫描完成
+	case "queue_initialized":
+		b.updateStats(func(stats *autoBridgeStats) {
+			stats.BridgeEnabled = true
+			if v, ok := readNumber(evt.Payload["total"]); ok {
+				stats.LastQueue = v
+			}
+		})
+		// 根据初始队列大小延长
+		if total, ok := readNumber(evt.Payload["total"]); ok && total > 0 {
+			extendMs := total * 300
+			if extendMs > 60000 {
+				extendMs = 60000
+			}
+			b.extend(time.Duration(extendMs) * time.Millisecond)
+		}
+
+	// 新增：弹窗处理事件 - 正在处理弹窗
+	case "popup_detected", "popup_content":
+		b.updateStats(func(stats *autoBridgeStats) {
+			stats.BridgeEnabled = true
+		})
+		// 弹窗处理需要额外时间
+		b.extend(2 * time.Second)
+
+	// 新增：Shadow DOM/iframe 扫描事件
+	case "shadow_dom_scanned", "iframes_processed":
+		b.updateStats(func(stats *autoBridgeStats) {
+			stats.BridgeEnabled = true
+		})
+		if count, ok := readNumber(evt.Payload["elements_found"]); ok && count > 0 {
+			extendMs := count * 200
+			if extendMs > 10000 {
+				extendMs = 10000
+			}
+			b.extend(time.Duration(extendMs) * time.Millisecond)
+		} else if count, ok := readNumber(evt.Payload["count"]); ok && count > 0 {
+			b.extend(time.Duration(count*1000) * time.Millisecond)
+		}
+
+	// 新增：自适应延迟统计 - 表示JS仍在活跃运行
+	case "adaptive_delay_stats":
+		b.updateStats(func(stats *autoBridgeStats) {
+			stats.BridgeEnabled = true
+		})
+		// 有pending请求时给予更多时间
+		if pending, ok := readNumber(evt.Payload["pending_requests"]); ok && pending > 0 {
+			b.extend(time.Duration(pending*500+2000) * time.Millisecond)
+		} else {
+			b.extend(2 * time.Second)
+		}
+
+	// 新增：bridge_ready 事件 - JS桥接已准备好
+	case "bridge_ready":
+		b.updateStats(func(stats *autoBridgeStats) {
+			stats.BridgeEnabled = true
+		})
+		// 初始化完成，给予基础时间
+		b.extend(5 * time.Second)
+
+	// 新增：心跳事件 - JS定期上报进度
+	case "heartbeat":
+		b.updateStats(func(stats *autoBridgeStats) {
+			stats.BridgeEnabled = true
+			if v, ok := readNumber(evt.Payload["actions"]); ok {
+				stats.Actions = v
+			}
+			if v, ok := readNumber(evt.Payload["batches"]); ok {
+				stats.Batches = v
+			}
+			if v, ok := readNumber(evt.Payload["queue_total"]); ok {
+				stats.LastQueue = v
+			}
+		})
+		// 根据心跳数据延长超时
+		b.extendFromPayload(evt.Payload, "extend_ms")
+
 	default:
 		// best effort logging, no-op
 	}
@@ -244,15 +353,44 @@ func (b *autoBridge) SuggestTimeout() time.Duration {
 	if tabTimeout <= 0 {
 		tabTimeout = 180 * time.Second
 	}
+
+	// 计算基础预估时间
 	estimated := EstimateAutoDuration()
 	if estimated <= 0 {
 		estimated = 15 * time.Second
 	}
-	if estimated+5*time.Second > tabTimeout {
-		estimated = tabTimeout - time.Second
+
+	// 考虑框架初始化时间（Vue/React等需要额外时间）
+	frameworkBuffer := 5 * time.Second
+
+	// 考虑网络延迟和DOM变化
+	networkBuffer := 3 * time.Second
+
+	// 总预估 = 基础预估 + 框架缓冲 + 网络缓冲
+	totalEstimated := estimated + frameworkBuffer + networkBuffer
+
+	// 软超时配置
+	softTimeout := time.Duration(conf.GlobalConfig.BrowserConf.TabSoftTimeout) * time.Second
+	if softTimeout <= 0 {
+		softTimeout = 60 * time.Second
 	}
-	if estimated < 5*time.Second {
-		estimated = 5 * time.Second
+
+	// 使用软超时和预估时间中较大的值作为初始超时
+	// 这样即使预估不准确，也有更多时间通过心跳延长
+	suggestedTimeout := totalEstimated
+	if softTimeout > suggestedTimeout {
+		suggestedTimeout = softTimeout
 	}
-	return estimated
+
+	// 但不能超过硬超时
+	if suggestedTimeout+5*time.Second > tabTimeout {
+		suggestedTimeout = tabTimeout - time.Second
+	}
+
+	// 最小保证
+	if suggestedTimeout < 10*time.Second {
+		suggestedTimeout = 10 * time.Second
+	}
+
+	return suggestedTimeout
 }

@@ -50,6 +50,35 @@ type EngineInfo struct {
 	resourceVisited    map[string]struct{}
 	resourceMu         sync.Mutex
 
+	// P0优化: 浏览器池
+	BrowserPool *BrowserPool
+	// P0优化: 自适应并发控制
+	Autoscaler *Autoscaler
+	// P0优化: 响应缓存
+	ResponseCache *ResponseCache
+	// P0优化: 资源过滤器
+	ResourceFilter *ResourceFilter
+
+	// P1优化: 增强反检测
+	EnhancedStealth *EnhancedStealth
+	// P1优化: 智能表单填充
+	SmartFormFiller *SmartFormFiller
+	// P1优化: 被动爬取
+	PassiveCrawler *PassiveCrawler
+	// P1优化: 双引擎架构
+	DualEngine *DualEngine
+
+	// P2优化: JS静态分析
+	JSAnalyzer *JSAnalyzer
+	// P2优化: 智能深度控制
+	SmartDepthController *SmartDepthController
+	// P2优化: 分布式协调器
+	DistributedCoordinator *DistributedCoordinator
+	// P2优化: 浏览器请求限速器
+	BrowserRateLimiter *BrowserRateLimiter
+	// P3优化: WebSocket 追踪器
+	WebSocketTracker *WebSocketTracker
+
 	Scheduler *Scheduler
 
 	ResultHtmlData *HtmlData
@@ -60,7 +89,9 @@ type EngineInfo struct {
 	PendingNormalizeQueue   chan *PendingUrl
 	NormalizeCloseChan      chan int
 	NormalizeCloseChanFlag  bool
+	normalizeResultMu       sync.RWMutex
 	NormalizeationResultMap map[string]int
+	normalizeStaticMu       sync.RWMutex
 	NormalizeationStaticMap map[string]int
 
 	Interactions    []Interaction
@@ -73,14 +104,20 @@ type EngineInfo struct {
 
 	eventHandlersMu sync.RWMutex
 	eventHandlers   []func(EngineEvent)
+
+	loginOnce    sync.Once
+	loginOnceErr error
 }
 
 type MetricsSummary struct {
-	Target         string `json:"target"`
-	PagesProcessed int64  `json:"pages_processed"`
-	UrlsDropped    int64  `json:"urls_dropped"`
-	TabsTimeout    int64  `json:"tabs_timeout"`
-	ResultCount    int    `json:"result_count"`
+	Target          string                 `json:"target"`
+	PagesProcessed  int64                  `json:"pages_processed"`
+	UrlsDropped     int64                  `json:"urls_dropped"`
+	TabsTimeout     int64                  `json:"tabs_timeout"`
+	ResultCount     int                    `json:"result_count"`
+	RateLimitStats  *BrowserRateLimitStats `json:"rate_limit_stats,omitempty"`
+	DualEngineStats *DualEngineStats       `json:"dual_engine_stats,omitempty"`
+	WebSocketStats  *WebSocketStats        `json:"websocket_stats,omitempty"`
 }
 
 type EngineEvent struct {
@@ -110,6 +147,97 @@ func InitEngine(target string) *EngineInfo {
 	InitFilter()
 	// 初始化浏览器
 	engineInfo := InitEngineInfo(target)
+
+	// P0优化: 初始化浏览器池
+	poolCfg := DefaultBrowserPoolConfig()
+	engineInfo.BrowserPool = NewBrowserPool(poolCfg)
+
+	// P0优化: 初始化自适应并发控制器
+	asCfg := DefaultAutoscalerConfig()
+	asCfg.MaxConcurrency = conf.GlobalConfig.BrowserConf.TabCount
+	if asCfg.MaxConcurrency <= 0 {
+		asCfg.MaxConcurrency = 5
+	}
+	engineInfo.Autoscaler = NewAutoscaler(asCfg)
+
+	// P0优化: 初始化响应缓存
+	cacheCfg := DefaultResponseCacheConfig()
+	engineInfo.ResponseCache = NewResponseCache(cacheCfg)
+
+	// P0优化: 初始化资源过滤器
+	engineInfo.ResourceFilter = NewResourceFilter()
+
+	// P1优化: 初始化增强反检测
+	engineInfo.EnhancedStealth = NewEnhancedStealth()
+
+	// P1优化: 初始化智能表单填充
+	engineInfo.SmartFormFiller = NewSmartFormFiller()
+
+	// P1优化: 初始化被动爬取
+	passiveCfg := DefaultPassiveCrawlerConfig()
+	engineInfo.PassiveCrawler = NewPassiveCrawler(engineInfo, passiveCfg)
+	engineInfo.PassiveCrawler.Start()
+
+	// P1优化: 初始化双引擎架构
+	dualEngineCfg := DefaultDualEngineConfig()
+	// 应用配置
+	if conf.GlobalConfig.DualEngineConf.Enabled {
+		dualEngineCfg.Enabled = true
+	}
+	if conf.GlobalConfig.DualEngineConf.StandardWorkers > 0 {
+		dualEngineCfg.StandardEngineWorkers = conf.GlobalConfig.DualEngineConf.StandardWorkers
+	}
+	engineInfo.DualEngine = NewDualEngine(engineInfo, dualEngineCfg)
+	engineInfo.DualEngine.Start()
+
+	// P2优化: 初始化JS分析器
+	jsAnalyzerCfg := DefaultJSAnalyzerConfig()
+	engineInfo.JSAnalyzer = NewJSAnalyzer(jsAnalyzerCfg)
+
+	// P2优化: 初始化智能深度控制
+	depthCfg := DefaultSmartDepthConfig()
+	engineInfo.SmartDepthController = NewSmartDepthController(depthCfg)
+
+	// P2优化: 初始化分布式协调器(可选，根据配置启用)
+	if conf.GlobalConfig.DistributedMode {
+		distCfg := DefaultDistributedConfig()
+		engineInfo.DistributedCoordinator = NewDistributedCoordinator(engineInfo, distCfg)
+		engineInfo.DistributedCoordinator.Start()
+	}
+
+	// P2优化: 初始化浏览器限速器
+	browserRateCfg := DefaultBrowserRateLimitConfig()
+	if conf.GlobalConfig.RateLimitConf.Enabled {
+		browserRateCfg.Enabled = true
+	}
+	if conf.GlobalConfig.RateLimitConf.BaseIntervalMs > 0 {
+		browserRateCfg.BaseInterval = time.Duration(conf.GlobalConfig.RateLimitConf.BaseIntervalMs) * time.Millisecond
+	}
+	if conf.GlobalConfig.RateLimitConf.MinIntervalMs > 0 {
+		browserRateCfg.MinInterval = time.Duration(conf.GlobalConfig.RateLimitConf.MinIntervalMs) * time.Millisecond
+	}
+	if conf.GlobalConfig.RateLimitConf.MaxIntervalMs > 0 {
+		browserRateCfg.MaxInterval = time.Duration(conf.GlobalConfig.RateLimitConf.MaxIntervalMs) * time.Millisecond
+	}
+	engineInfo.BrowserRateLimiter = NewBrowserRateLimiter(browserRateCfg)
+
+	// P3优化: 初始化 WebSocket 追踪器
+	wsCfg := DefaultWebSocketConfig()
+	if conf.GlobalConfig.WebSocketConf.Enabled {
+		wsCfg.Enabled = true
+	}
+	if conf.GlobalConfig.WebSocketConf.MaxConnections > 0 {
+		wsCfg.MaxConnections = conf.GlobalConfig.WebSocketConf.MaxConnections
+	}
+	if conf.GlobalConfig.WebSocketConf.MaxMessagesPerConn > 0 {
+		wsCfg.MaxMessagesPerConn = conf.GlobalConfig.WebSocketConf.MaxMessagesPerConn
+	}
+	if conf.GlobalConfig.WebSocketConf.CaptureMessages {
+		wsCfg.CaptureMessages = true
+	}
+	engineInfo.WebSocketTracker = NewWebSocketTracker(wsCfg)
+	engineInfo.WebSocketTracker.Start()
+
 	// 初始化泛化模块
 	engineInfo.InitNormalize()
 	// 初始化 结果处理模块
@@ -121,8 +249,20 @@ func InitEngine(target string) *EngineInfo {
 	return engineInfo
 }
 
+var leaklessHintOnce sync.Once
+
 func NewBrowserOptions() *launcher.Launcher {
 	options := launcher.New().NoSandbox(true).Headless(true)
+	disableLeakless := conf.GlobalConfig.BrowserConf.DisableLeakless
+	if runtime.GOOS == "windows" && !disableLeakless {
+		leaklessHintOnce.Do(func() {
+			log.Logger.Infof("Windows 环境默认启用 leakless，如被杀软拦截 leakless.exe 请暂时关闭杀软或将其加入白名单。")
+		})
+	}
+	if disableLeakless {
+		log.Logger.Debug("根据配置关闭 leakless")
+		options = options.Leakless(false)
+	}
 	// 指定chrome浏览器路径
 	if conf.GlobalConfig.BrowserConf.Chrome != "" {
 		log.Logger.Infof("chrome path: %s", conf.GlobalConfig.BrowserConf.Chrome)
@@ -303,13 +443,33 @@ func (ei *EngineInfo) RecordPageProcessed(uif *UrlInfo) {
 }
 
 func (ei *EngineInfo) MetricsSummary() MetricsSummary {
-	return MetricsSummary{
+	summary := MetricsSummary{
 		Target:         ei.Target,
 		PagesProcessed: atomic.LoadInt64(&ei.PagesProcessed),
 		UrlsDropped:    atomic.LoadInt64(&ei.UrlsDropped),
 		TabsTimeout:    atomic.LoadInt64(&ei.TabsTimeout),
 		ResultCount:    len(ei.ResultList),
 	}
+
+	// P2优化: 添加限速统计
+	if ei.BrowserRateLimiter != nil {
+		stats := ei.BrowserRateLimiter.Stats()
+		summary.RateLimitStats = &stats
+	}
+
+	// P1优化: 添加双引擎统计
+	if ei.DualEngine != nil {
+		stats := ei.DualEngine.GetStats()
+		summary.DualEngineStats = &stats
+	}
+
+	// P3优化: 添加 WebSocket 统计
+	if ei.WebSocketTracker != nil {
+		stats := ei.WebSocketTracker.GetStats()
+		summary.WebSocketStats = &stats
+	}
+
+	return summary
 }
 
 func (ei *EngineInfo) SubscribeEvents(handler func(EngineEvent)) {
@@ -382,7 +542,38 @@ func (ei *EngineInfo) Finish() {
 
 func (ei *EngineInfo) Close() {
 	ei.SaveResult()
-	// 关闭所有浏览器
+
+	// P3优化: 停止 WebSocket 追踪器
+	if ei.WebSocketTracker != nil {
+		ei.WebSocketTracker.Stop()
+	}
+
+	// P2优化: 停止分布式协调器
+	if ei.DistributedCoordinator != nil {
+		ei.DistributedCoordinator.Stop()
+	}
+
+	// P1优化: 停止被动爬取
+	if ei.PassiveCrawler != nil {
+		ei.PassiveCrawler.Stop()
+	}
+
+	// P0优化: 关闭浏览器池
+	if ei.BrowserPool != nil {
+		ei.BrowserPool.Close()
+	}
+
+	// P0优化: 停止自适应控制器
+	if ei.Autoscaler != nil {
+		ei.Autoscaler.Stop()
+	}
+
+	// P0优化: 关闭响应缓存
+	if ei.ResponseCache != nil {
+		ei.ResponseCache.Close()
+	}
+
+	// 关闭所有浏览器（兼容旧模式）
 	for _, b := range ei.BrowserList {
 		if b != nil {
 			b.Close()

@@ -73,7 +73,7 @@ GLOBAL OPTIONS:
    --debug             Output debug info? (default: false)
    --dev               Enable dev mode, activates browser interface and stops after page access for dev purposes. (default: false)
    --testplayback      irectly end if open, after specified playback script execution. (default: false)
-   --unheadless, --uh  Default interface disabled? Use 'uh' to enable it. (default: false)
+   --unheadless, --uh  Enable visible browser; 自动交互会把点击目标用红框高亮，便于观察。(default: false)
 
    OutPut
 
@@ -261,7 +261,11 @@ https://chat.openai.com/
 
 ## FAQ 
 
-如果运行出现杀毒报毒 如图 说 leakless.exe 有问题 可以信任他 这是 go-rod用来控制chrome进程遗留问题的 源码在这里 https://github.com/ysmood/leakless 当然也可以自己编译替换  
+### Windows 控制台颜色乱码（出现 `[36m` 等 ANSI 字符）
+v2025.11.16 起 Windows 版本会在日志初始化时自动打开 Virtual Terminal Processing 并使用 go-colorable 接管标准错误输出，正常情况下不再出现彩色代码。若仍然无法显示颜色，请在 PowerShell/Windows Terminal 中运行，或者在极老版本 Windows 10 上手动运行 `Set-ItemProperty -Path HKCU:\Console -Name VirtualTerminalLevel -Value 1` 后重新启动终端。
+
+### Windows 提示 leakless.exe 被占用/被杀毒
+Windows 版默认启用 leakless 来管理 Chrome 子进程。如果被杀软拦截或提示“文件被占用”，请先将 `leakless.exe` 加入白名单，或临时关闭杀软后再次运行；只有在确实无法放行的情况下，再在 `configs/config.yml` 中把 `browser.disable_leakless` 设为 `true` 来关闭 leakless。  
 ![](imgs/leakless.png)
 
 argo的编译后的程序是 github action 自动编译的 当然可以自己编译  

@@ -45,6 +45,16 @@ auto:
   command_timeout_ms: 800 # 等待 go 端下一步指令的超时时间(ms)
   interactions: ["login", "playback", "auto"]
   middlewares: ["static", "interaction", "metrics"]
+rate_limit:
+  enabled: true # 是否启用自适应限速
+  base_interval_ms: 200 # 基准间隔(毫秒)，请求之间的最小间隔
+  min_interval_ms: 50 # 最小间隔(毫秒)，成功时可降低到此值
+  max_interval_ms: 10000 # 最大间隔(毫秒)，被限速时最大等待时间
+websocket:
+  enabled: true # 是否启用 WebSocket 监控
+  max_connections: 100 # 最大追踪连接数
+  max_messages_per_conn: 50 # 每个连接最大消息数
+  capture_messages: true # 是否捕获消息内容
 
 `
 
@@ -63,6 +73,36 @@ type Conf struct {
 	Quiet            bool
 	MetricsFile      string
 	SeedOutput       string
+	// P1优化: 双引擎模式
+	DualEngineConf DualEngineConf `yaml:"dual_engine"`
+	// P2优化: 分布式模式
+	DistributedMode bool `yaml:"distributed_mode"`
+	// P2优化: 自适应限速配置
+	RateLimitConf RateLimitConf `yaml:"rate_limit"`
+	// P3优化: WebSocket 配置
+	WebSocketConf WebSocketConf `yaml:"websocket"`
+}
+
+// DualEngineConf 双引擎配置
+type DualEngineConf struct {
+	Enabled         bool `yaml:"enabled"`          // 是否启用双引擎
+	StandardWorkers int  `yaml:"standard_workers"` // 标准引擎并发数
+}
+
+// RateLimitConf 自适应限速配置
+type RateLimitConf struct {
+	Enabled        bool `yaml:"enabled"`          // 是否启用自适应限速
+	BaseIntervalMs int  `yaml:"base_interval_ms"` // 基准间隔(毫秒)
+	MinIntervalMs  int  `yaml:"min_interval_ms"`  // 最小间隔(毫秒)
+	MaxIntervalMs  int  `yaml:"max_interval_ms"`  // 最大间隔(毫秒)
+}
+
+// WebSocketConf WebSocket 配置
+type WebSocketConf struct {
+	Enabled            bool `yaml:"enabled"`               // 是否启用 WebSocket 监控
+	MaxConnections     int  `yaml:"max_connections"`       // 最大追踪连接数
+	MaxMessagesPerConn int  `yaml:"max_messages_per_conn"` // 每个连接最大消息数
+	CaptureMessages    bool `yaml:"capture_messages"`      // 是否捕获消息内容
 }
 
 // 保存的格式
@@ -97,6 +137,10 @@ type BrowserConf struct {
 	ScheduleInterval int    `yaml:"schedule_interval"`
 	MaxRetries       int    `yaml:"max_retries"`
 	DisableLeakless  bool   `yaml:"disable_leakless"`
+	// P0优化: 浏览器池配置
+	EnablePool       bool   `yaml:"enable_pool"`        // 是否启用浏览器池
+	PoolMaxInstances int    `yaml:"pool_max_instances"` // 池最大实例数
+	PoolMaxTabs      int    `yaml:"pool_max_tabs"`      // 每实例最大Tab数
 }
 
 // auto 自动触发的一些参数

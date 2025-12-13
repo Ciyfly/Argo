@@ -135,6 +135,18 @@ func (s *Scheduler) dispatchLoop() {
 		if s.rateLimiter != nil {
 			<-s.rateLimiter
 		}
+
+		// P1优化: 双引擎路由
+		if s.engine.DualEngine != nil && s.engine.DualEngine.config.Enabled {
+			engineType := s.engine.DualEngine.ProcessURL(item.info)
+			if engineType == EngineTypeStandard {
+				// 使用标准引擎 (HTTP Client)
+				s.engine.DualEngine.SubmitToStandard(item.info)
+				continue
+			}
+			// 否则使用混合引擎 (Browser)
+		}
+
 		s.pushTabQueue(item.info)
 	}
 }
@@ -146,8 +158,18 @@ func (s *Scheduler) pushTabQueue(uif *UrlInfo) {
 
 func (s *Scheduler) tabWork() {
 	for {
+		// P0优化: 使用自适应并发控制获取当前并发数
+		currentLimit := s.getCurrentConcurrency()
+
 		select {
 		case s.tabLimit <- struct{}{}:
+			// 检查是否超过当前自适应限制
+			if s.getActiveCount() > currentLimit {
+				<-s.tabLimit
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+
 			uif := <-s.tabQueue
 			if uif == nil {
 				<-s.tabLimit
@@ -170,14 +192,38 @@ func (s *Scheduler) tabWork() {
 					s.engine.EmitEvent(EngineEvent{Type: "tab_finish", Target: info.Url, Timestamp: time.Now()})
 				}()
 				s.engine.EmitEvent(EngineEvent{Type: "tab_start", Target: info.Url, Timestamp: time.Now(), Data: map[string]interface{}{"depth": info.Depth}})
+
+				// P0优化: 优先使用浏览器池
+				usePool := s.engine.BrowserPool != nil && conf.GlobalConfig.BrowserConf.EnablePool
 				if info.SourceType == "homePage" {
-					s.engine.NewTab(info, HOME_PAGE_FLAG)
+					if usePool {
+						s.engine.NewTabWithPool(info, HOME_PAGE_FLAG)
+					} else {
+						s.engine.NewTab(info, HOME_PAGE_FLAG)
+					}
 				} else {
-					s.engine.NewTab(info, NOT_HOME_PAGE_FLAG)
+					if usePool {
+						s.engine.NewTabWithPool(info, NOT_HOME_PAGE_FLAG)
+					} else {
+						s.engine.NewTab(info, NOT_HOME_PAGE_FLAG)
+					}
 				}
 			}(uif)
 		default:
 			time.Sleep(200 * time.Millisecond)
 		}
 	}
+}
+
+// getCurrentConcurrency 获取当前自适应并发数
+func (s *Scheduler) getCurrentConcurrency() int {
+	if s.engine.Autoscaler != nil {
+		return s.engine.Autoscaler.GetConcurrency()
+	}
+	return conf.GlobalConfig.BrowserConf.TabCount
+}
+
+// getActiveCount 获取当前活跃Tab数
+func (s *Scheduler) getActiveCount() int {
+	return len(s.tabLimit)
 }

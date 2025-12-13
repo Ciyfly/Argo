@@ -82,6 +82,8 @@ type EngineInfo struct {
 	IncrementalCrawler *IncrementalCrawler
 	// P3优化: GraphQL 发现器
 	GraphQLDiscoverer *GraphQLDiscoverer
+	// P3优化: Swagger/OpenAPI 发现器
+	SwaggerDiscoverer *SwaggerDiscoverer
 
 	Scheduler *Scheduler
 
@@ -124,6 +126,7 @@ type MetricsSummary struct {
 	WebSocketStats   *WebSocketStats        `json:"websocket_stats,omitempty"`
 	IncrementalStats *IncrementalStats      `json:"incremental_stats,omitempty"`
 	GraphQLStats     *GraphQLStats          `json:"graphql_stats,omitempty"`
+	SwaggerStats     *SwaggerStats          `json:"swagger_stats,omitempty"`
 }
 
 type EngineEvent struct {
@@ -280,6 +283,25 @@ func InitEngine(target string) *EngineInfo {
 	}
 	engineInfo.GraphQLDiscoverer = NewGraphQLDiscoverer(engineInfo, gqlCfg)
 
+	// P3优化: 初始化 Swagger/OpenAPI 发现器
+	swaggerCfg := DefaultSwaggerConfig()
+	if conf.GlobalConfig.SwaggerConf.Enabled {
+		swaggerCfg.Enabled = true
+	}
+	if conf.GlobalConfig.SwaggerConf.AutoDiscover {
+		swaggerCfg.AutoDiscover = true
+	}
+	if conf.GlobalConfig.SwaggerConf.ParseSpec {
+		swaggerCfg.ParseSpec = true
+	}
+	if conf.GlobalConfig.SwaggerConf.GenerateRequests {
+		swaggerCfg.GenerateRequests = true
+	}
+	if conf.GlobalConfig.SwaggerConf.TimeoutMs > 0 {
+		swaggerCfg.Timeout = time.Duration(conf.GlobalConfig.SwaggerConf.TimeoutMs) * time.Millisecond
+	}
+	engineInfo.SwaggerDiscoverer = NewSwaggerDiscoverer(engineInfo, swaggerCfg)
+
 	// 初始化泛化模块
 	engineInfo.InitNormalize()
 	// 初始化 结果处理模块
@@ -417,6 +439,22 @@ func (ei *EngineInfo) Start() error {
 				if ei.GraphQLDiscoverer.config.EnableIntrospection {
 					ei.GraphQLDiscoverer.IntrospectAll()
 				}
+			}
+		}()
+	}
+
+	// P3优化: Swagger/OpenAPI 端点发现
+	if ei.SwaggerDiscoverer != nil && ei.SwaggerDiscoverer.config.Enabled {
+		go func() {
+			specs := ei.SwaggerDiscoverer.DiscoverFromBaseURL(ei.Target)
+			if len(specs) > 0 {
+				log.Logger.Infof("swagger: discovered %d specs, extracting endpoints...", len(specs))
+				// 将发现的 API 端点提交给爬虫
+				urlInfos := ei.SwaggerDiscoverer.ExportEndpointsForCrawler()
+				for _, uif := range urlInfos {
+					ei.PushStaticUrl(uif)
+				}
+				log.Logger.Infof("swagger: submitted %d API endpoints to crawler", len(urlInfos))
 			}
 		}()
 	}
@@ -571,6 +609,12 @@ func (ei *EngineInfo) MetricsSummary() MetricsSummary {
 	if ei.GraphQLDiscoverer != nil {
 		stats := ei.GraphQLDiscoverer.GetStats()
 		summary.GraphQLStats = &stats
+	}
+
+	// P3优化: 添加 Swagger 统计
+	if ei.SwaggerDiscoverer != nil {
+		stats := ei.SwaggerDiscoverer.GetStats()
+		summary.SwaggerStats = &stats
 	}
 
 	return summary

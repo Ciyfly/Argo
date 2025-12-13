@@ -1346,6 +1346,7 @@ browser_pool:
 | **P3** | WebSocket 支持 | 完整性 | 中 | ✅ 已完成 |
 | **P3** | 增量爬取 | 效率提升 | 中 | ✅ 已完成 |
 | **P3** | GraphQL 支持 | API 覆盖 | 中 | ✅ 已完成 |
+| **P3** | Swagger/OpenAPI 支持 | API 覆盖 | 中 | ✅ 已完成 |
 
 ---
 
@@ -1467,6 +1468,26 @@ browser_pool:
   - JS 中的 gql 模板查询
   - JSON 中的 query 字段
 
+#### 4. Swagger/OpenAPI 支持 (Swagger Discovery)
+- **文件**: `pkg/engine/swagger.go`
+- **功能**:
+  - 自动发现 Swagger/OpenAPI 规范文件 (40+ 常见路径扫描)
+  - 支持 Swagger 2.0 和 OpenAPI 3.x 规范
+  - 从 Swagger UI 页面提取规范 URL
+  - 完整规范解析 (paths, operations, parameters, responses)
+  - 智能示例请求生成
+  - API 端点自动提交给爬虫
+- **配置**: `swagger.enabled`, `swagger.auto_discover`, `swagger.parse_spec`, `swagger.generate_requests`
+- **发现路径**:
+  - Swagger 2.0: `/swagger.json`, `/api-docs`, `/v2/api-docs` 等
+  - OpenAPI 3.x: `/openapi.json`, `/v3/api-docs` 等
+  - Swagger UI: `/swagger-ui.html`, `/docs`, `/documentation` 等
+- **提取内容**:
+  - API 规范元信息 (标题、版本、描述)
+  - 所有 API 端点 (URL、Method、参数、Content-Type)
+  - 示例请求 (根据参数类型智能生成)
+  - 安全定义 (认证方式)
+
 ---
 
 ## 十、配置参考
@@ -1512,6 +1533,13 @@ graphql:
   enable_introspection: true
   max_depth: 3
   timeout_ms: 10000
+
+swagger:
+  enabled: true
+  auto_discover: true
+  parse_spec: true
+  generate_requests: true
+  timeout_ms: 15000
 ```
 
 ---
@@ -1556,6 +1584,7 @@ Argo 爬虫经过全面优化后，已具备以下能力：
    - 增量爬取和断点续爬
    - 智能深度控制
    - GraphQL 端点发现和内省
+   - Swagger/OpenAPI 规范发现和解析
    - 全面的 Metrics 统计输出
 
 ### 架构改进

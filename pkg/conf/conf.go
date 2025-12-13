@@ -67,6 +67,12 @@ graphql:
   enable_introspection: true # 启用内省查询
   max_depth: 3 # 内省最大深度
   timeout_ms: 10000 # 请求超时(毫秒)
+swagger:
+  enabled: true # 是否启用 Swagger/OpenAPI 发现
+  auto_discover: true # 自动发现规范文件
+  parse_spec: true # 解析规范提取端点
+  generate_requests: true # 生成示例请求
+  timeout_ms: 15000 # 请求超时(毫秒)
 
 `
 
@@ -97,6 +103,8 @@ type Conf struct {
 	IncrementalConf IncrementalConf `yaml:"incremental"`
 	// P3优化: GraphQL 配置
 	GraphQLConf GraphQLConf `yaml:"graphql"`
+	// P3优化: Swagger/OpenAPI 配置
+	SwaggerConf SwaggerConf `yaml:"swagger"`
 }
 
 // DualEngineConf 双引擎配置
@@ -137,6 +145,15 @@ type GraphQLConf struct {
 	EnableIntrospection bool `yaml:"enable_introspection"` // 启用内省查询
 	MaxDepth            int  `yaml:"max_depth"`            // 内省最大深度
 	TimeoutMs           int  `yaml:"timeout_ms"`           // 请求超时(毫秒)
+}
+
+// SwaggerConf Swagger/OpenAPI 发现配置
+type SwaggerConf struct {
+	Enabled          bool `yaml:"enabled"`           // 是否启用 Swagger 发现
+	AutoDiscover     bool `yaml:"auto_discover"`     // 自动发现规范文件
+	ParseSpec        bool `yaml:"parse_spec"`        // 解析规范提取端点
+	GenerateRequests bool `yaml:"generate_requests"` // 生成示例请求
+	TimeoutMs        int  `yaml:"timeout_ms"`        // 请求超时(毫秒)
 }
 
 // 保存的格式

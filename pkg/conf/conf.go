@@ -55,6 +55,12 @@ websocket:
   max_connections: 100 # 最大追踪连接数
   max_messages_per_conn: 50 # 每个连接最大消息数
   capture_messages: true # 是否捕获消息内容
+incremental:
+  enabled: false # 是否启用增量爬取
+  state_file: "" # 状态文件路径,为空则自动生成
+  max_age_hours: 24 # URL最大有效期(小时),超过后重新爬取
+  auto_save_interval_min: 5 # 自动保存间隔(分钟)
+  resume_from_pending: true # 是否从未完成的URL继续
 
 `
 
@@ -81,6 +87,8 @@ type Conf struct {
 	RateLimitConf RateLimitConf `yaml:"rate_limit"`
 	// P3优化: WebSocket 配置
 	WebSocketConf WebSocketConf `yaml:"websocket"`
+	// P3优化: 增量爬取配置
+	IncrementalConf IncrementalConf `yaml:"incremental"`
 }
 
 // DualEngineConf 双引擎配置
@@ -103,6 +111,15 @@ type WebSocketConf struct {
 	MaxConnections     int  `yaml:"max_connections"`       // 最大追踪连接数
 	MaxMessagesPerConn int  `yaml:"max_messages_per_conn"` // 每个连接最大消息数
 	CaptureMessages    bool `yaml:"capture_messages"`      // 是否捕获消息内容
+}
+
+// IncrementalConf 增量爬取配置
+type IncrementalConf struct {
+	Enabled             bool   `yaml:"enabled"`                // 是否启用增量爬取
+	StateFile           string `yaml:"state_file"`             // 状态文件路径
+	MaxAgeHours         int    `yaml:"max_age_hours"`          // URL最大有效期(小时)
+	AutoSaveIntervalMin int    `yaml:"auto_save_interval_min"` // 自动保存间隔(分钟)
+	ResumeFromPending   bool   `yaml:"resume_from_pending"`    // 是否从未完成的URL继续
 }
 
 // 保存的格式

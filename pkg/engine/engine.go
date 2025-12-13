@@ -78,6 +78,8 @@ type EngineInfo struct {
 	BrowserRateLimiter *BrowserRateLimiter
 	// P3优化: WebSocket 追踪器
 	WebSocketTracker *WebSocketTracker
+	// P3优化: 增量爬取
+	IncrementalCrawler *IncrementalCrawler
 
 	Scheduler *Scheduler
 
@@ -110,14 +112,15 @@ type EngineInfo struct {
 }
 
 type MetricsSummary struct {
-	Target          string                 `json:"target"`
-	PagesProcessed  int64                  `json:"pages_processed"`
-	UrlsDropped     int64                  `json:"urls_dropped"`
-	TabsTimeout     int64                  `json:"tabs_timeout"`
-	ResultCount     int                    `json:"result_count"`
-	RateLimitStats  *BrowserRateLimitStats `json:"rate_limit_stats,omitempty"`
-	DualEngineStats *DualEngineStats       `json:"dual_engine_stats,omitempty"`
-	WebSocketStats  *WebSocketStats        `json:"websocket_stats,omitempty"`
+	Target           string                 `json:"target"`
+	PagesProcessed   int64                  `json:"pages_processed"`
+	UrlsDropped      int64                  `json:"urls_dropped"`
+	TabsTimeout      int64                  `json:"tabs_timeout"`
+	ResultCount      int                    `json:"result_count"`
+	RateLimitStats   *BrowserRateLimitStats `json:"rate_limit_stats,omitempty"`
+	DualEngineStats  *DualEngineStats       `json:"dual_engine_stats,omitempty"`
+	WebSocketStats   *WebSocketStats        `json:"websocket_stats,omitempty"`
+	IncrementalStats *IncrementalStats      `json:"incremental_stats,omitempty"`
 }
 
 type EngineEvent struct {
@@ -238,6 +241,23 @@ func InitEngine(target string) *EngineInfo {
 	engineInfo.WebSocketTracker = NewWebSocketTracker(wsCfg)
 	engineInfo.WebSocketTracker.Start()
 
+	// P3优化: 初始化增量爬取
+	incCfg := DefaultIncrementalConfig()
+	if conf.GlobalConfig.IncrementalConf.Enabled {
+		incCfg.Enabled = true
+	}
+	if conf.GlobalConfig.IncrementalConf.StateFile != "" {
+		incCfg.StateFile = conf.GlobalConfig.IncrementalConf.StateFile
+	}
+	if conf.GlobalConfig.IncrementalConf.MaxAgeHours > 0 {
+		incCfg.MaxAge = time.Duration(conf.GlobalConfig.IncrementalConf.MaxAgeHours) * time.Hour
+	}
+	if conf.GlobalConfig.IncrementalConf.AutoSaveIntervalMin > 0 {
+		incCfg.AutoSaveInterval = time.Duration(conf.GlobalConfig.IncrementalConf.AutoSaveIntervalMin) * time.Minute
+	}
+	incCfg.ResumeFromPending = conf.GlobalConfig.IncrementalConf.ResumeFromPending
+	engineInfo.IncrementalCrawler = NewIncrementalCrawler(engineInfo, incCfg)
+
 	// 初始化泛化模块
 	engineInfo.InitNormalize()
 	// 初始化 结果处理模块
@@ -329,6 +349,28 @@ func (ei *EngineInfo) Start() error {
 	log.Logger.Debugf("browser timeout: %ds", conf.GlobalConfig.BrowserConf.BrowserTimeout)
 	log.Logger.Debugf("tab controller count: %d", conf.GlobalConfig.BrowserConf.TabCount)
 
+	// P3优化: 启动增量爬取
+	if ei.IncrementalCrawler != nil {
+		if err := ei.IncrementalCrawler.Start(ei.Target); err != nil {
+			log.Logger.Warnf("incremental crawler start failed: %v", err)
+		} else if ei.IncrementalCrawler.config.Enabled {
+			// 如果有待爬取的URL,从断点恢复
+			if ei.IncrementalCrawler.config.ResumeFromPending && ei.IncrementalCrawler.HasPendingURLs() {
+				pendingURLs := ei.IncrementalCrawler.GetPendingURLs()
+				log.Logger.Infof("resuming %d pending URLs from previous crawl", len(pendingURLs))
+				for _, pending := range pendingURLs {
+					ei.PushStaticUrl(&UrlInfo{
+						Url:       pending.URL,
+						Hash:      pending.Hash,
+						Depth:     pending.Depth,
+						SourceUrl: pending.SourceURL,
+						SourceType: "incremental_resume",
+					})
+				}
+			}
+		}
+	}
+
 	// 这个是 robots.txt|sitemap.xml 爬取解析的
 	var metadataWg sync.WaitGroup
 	metadataList := static.MetaDataSpider(ei.Target)
@@ -397,6 +439,20 @@ func (ei *EngineInfo) prepareUrl(uif *UrlInfo) bool {
 		uif.Canonical = canonical
 		uif.Url = canonical
 		uif.Hash = normalizeation(canonical, "GET")
+
+		// P3优化: 增量爬取检查
+		if ei.IncrementalCrawler != nil && ei.IncrementalCrawler.config.Enabled {
+			shouldCrawl, reason := ei.IncrementalCrawler.ShouldCrawl(canonical, uif.Hash)
+			if !shouldCrawl {
+				log.Logger.Debugf("[incremental skip] url=%s reason=%s", canonical, reason)
+				ei.IncrementalCrawler.MarkSkipped(uif.Hash)
+				atomic.AddInt64(&ei.UrlsDropped, 1)
+				return false
+			}
+			// 添加到待爬取队列
+			ei.IncrementalCrawler.AddPendingURL(canonical, uif.Hash, uif.Depth, uif.SourceUrl, 0)
+		}
+
 		return true
 	}
 	if lastErr != nil {
@@ -467,6 +523,12 @@ func (ei *EngineInfo) MetricsSummary() MetricsSummary {
 	if ei.WebSocketTracker != nil {
 		stats := ei.WebSocketTracker.GetStats()
 		summary.WebSocketStats = &stats
+	}
+
+	// P3优化: 添加增量爬取统计
+	if ei.IncrementalCrawler != nil {
+		stats := ei.IncrementalCrawler.GetStatistics()
+		summary.IncrementalStats = stats
 	}
 
 	return summary
@@ -542,6 +604,11 @@ func (ei *EngineInfo) Finish() {
 
 func (ei *EngineInfo) Close() {
 	ei.SaveResult()
+
+	// P3优化: 停止增量爬取 (优先保存状态)
+	if ei.IncrementalCrawler != nil {
+		ei.IncrementalCrawler.Stop()
+	}
 
 	// P3优化: 停止 WebSocket 追踪器
 	if ei.WebSocketTracker != nil {

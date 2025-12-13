@@ -1344,7 +1344,7 @@ browser_pool:
 | **P2** | 自适应限速 | 稳定性提升 | 中 | ✅ 已完成 |
 | **P2** | 敏感信息检测 | 安全增强 | 中 | ✅ 已完成 |
 | **P3** | WebSocket 支持 | 完整性 | 中 | ✅ 已完成 |
-| **P3** | 增量爬取 | 效率提升 | 中 | 待实现 |
+| **P3** | 增量爬取 | 效率提升 | 中 | ✅ 已完成 |
 | **P3** | GraphQL 支持 | API 覆盖 | 中 | 待实现 |
 
 ---
@@ -1435,6 +1435,22 @@ browser_pool:
   - 统计连接和消息数量
 - **配置**: `websocket.enabled`, `websocket.capture_messages`
 
+#### 2. 增量爬取 (Incremental Crawling)
+- **文件**: `pkg/engine/incremental.go`
+- **功能**:
+  - 爬取状态持久化 (JSON/GZIP)
+  - 断点续爬支持
+  - URL过期重爬机制
+  - 自动保存检查点
+  - 待爬取队列恢复
+  - 失败URL重试管理
+- **配置**: `incremental.enabled`, `incremental.max_age_hours`, `incremental.resume_from_pending`
+- **状态文件内容**:
+  - 已爬取URL及元信息
+  - 待爬取URL队列
+  - 失败URL记录
+  - 爬取统计信息
+
 ---
 
 ## 十、配置参考
@@ -1466,6 +1482,13 @@ websocket:
   max_connections: 100
   max_messages_per_conn: 50
   capture_messages: true
+
+incremental:
+  enabled: false
+  state_file: ""
+  max_age_hours: 24
+  auto_save_interval_min: 5
+  resume_from_pending: true
 ```
 
 ---
@@ -1507,6 +1530,7 @@ Argo 爬虫经过全面优化后，已具备以下能力：
 
 4. **功能完整性**:
    - WebSocket 连接监控和消息捕获
+   - 增量爬取和断点续爬
    - 智能深度控制
    - 全面的 Metrics 统计输出
 
@@ -1542,6 +1566,5 @@ Argo 爬虫经过全面优化后，已具备以下能力：
 
 ### 待实现优化
 
-- 增量爬取 (状态持久化)
 - GraphQL 内省支持
 - 代理池轮换

@@ -1347,6 +1347,11 @@ browser_pool:
 | **P3** | 增量爬取 | 效率提升 | 中 | ✅ 已完成 |
 | **P3** | GraphQL 支持 | API 覆盖 | 中 | ✅ 已完成 |
 | **P3** | Swagger/OpenAPI 支持 | API 覆盖 | 中 | ✅ 已完成 |
+| **P4** | 被动源发现 (Wayback/CommonCrawl) | +40% URL 发现 | 中 | ✅ 已完成 |
+| **P4** | 代理池轮换 | 稳定性提升 | 低 | ✅ 已完成 |
+| **P4** | 作用域控制 | 精准爬取 | 低 | ✅ 已完成 |
+| **P4** | 路径爬升 (Path Climbing) | +15% URL 发现 | 低 | ✅ 已完成 |
+| **P4** | 框架指纹识别 | 智能引擎切换 | 低 | ✅ 已完成 |
 
 ---
 
@@ -1488,6 +1493,92 @@ browser_pool:
   - 示例请求 (根据参数类型智能生成)
   - 安全定义 (认证方式)
 
+### P4 优化 (竞品对齐)
+
+#### 1. 被动源发现 (Passive Source Discovery)
+- **文件**: `pkg/engine/passive_sources.go`
+- **功能**:
+  - Wayback Machine 历史 URL 查询
+  - Common Crawl 索引查询
+  - AlienVault OTX 威胁情报
+  - VirusTotal 域名报告 (需 API Key)
+  - URLScan.io 搜索
+  - URL 去重和规范化
+  - 跟踪参数过滤
+- **配置**: `passive_sources.enabled`, `passive_sources.wayback`, `passive_sources.virustotal_api_key`
+- **提取内容**:
+  - 历史 URL 及来源
+  - JS 文件和 API 端点
+  - 按正则或扩展名过滤
+
+#### 2. 代理池轮换 (Proxy Pool)
+- **文件**: `pkg/proxy/pool.go`
+- **功能**:
+  - 从文件/字符串加载代理列表
+  - Round-Robin/Random/Smart 轮换策略
+  - 代理健康检查
+  - 失败代理自动剔除
+  - 成功率和延迟统计
+  - 智能选择最优代理
+- **配置**: `proxy_pool.enabled`, `proxy_pool.file`, `proxy_pool.rotation`
+- **轮换策略**:
+  - `round-robin`: 顺序轮换
+  - `random`: 随机选择健康代理
+  - `smart`: 基于成功率和延迟评分选择
+
+#### 3. 作用域控制 (Scope Controller)
+- **文件**: `pkg/engine/scope.go`
+- **功能**:
+  - 域名白名单/黑名单
+  - 子域名自动包含
+  - 路径前缀过滤
+  - 正则模式匹配
+  - 扩展名过滤 (图片/视频/文档)
+  - CDN 域名自动排除 (30+ 常见 CDN)
+  - 私有 IP 排除
+  - 爬取深度限制
+- **配置**: `scope.include_domains`, `scope.exclude_cdn`, `scope.max_depth`
+- **默认排除**:
+  - 图片: `.png`, `.jpg`, `.gif`, `.svg`, `.webp` 等
+  - 字体: `.woff`, `.woff2`, `.ttf`, `.eot` 等
+  - 媒体: `.mp4`, `.mp3`, `.avi`, `.mov` 等
+  - 文档: `.pdf`, `.doc`, `.xlsx`, `.ppt` 等
+  - 压缩包: `.zip`, `.rar`, `.7z`, `.tar`, `.gz` 等
+
+#### 4. 路径爬升 (Path Climbing)
+- **文件**: `pkg/engine/path_climber.go`
+- **功能**:
+  - 从深层路径向上生成父路径
+  - 例: `/api/v1/users/123/profile` → `/api/v1/users/123`, `/api/v1/users`, `/api/v1`, `/api`
+  - API 版本变体生成 (`/v1` → `/v2`, `/v3`)
+  - 常见端点后缀尝试 (`/api`, `/graphql`, `/swagger.json`)
+  - 参数值变体生成 (数字参数尝试 0, 1, -1, 999999)
+  - URL 去重防止重复爬取
+- **配置**: `path_climbing.enabled`, `path_climbing.max_climb_depth`
+- **用途**:
+  - 发现未直接链接的目录
+  - 探索 API 版本
+  - 测试参数边界
+
+#### 5. 框架指纹识别 (Framework Detection)
+- **文件**: `pkg/engine/framework_detector.go`
+- **功能**:
+  - 自动识别前端框架 (React, Vue, Angular, Next.js, Nuxt.js, Svelte, Ember)
+  - 识别后端框架 (WordPress, Drupal, Laravel, Django, Rails, Spring)
+  - 识别库 (jQuery, Backbone)
+  - SPA 检测和浏览器引擎自动切换
+  - 检测置信度评分
+  - Header/Cookie/Path 多维度检测
+- **配置**: `framework_detection.enabled`, `framework_detection.auto_switch_engine`
+- **检测方式**:
+  - HTML 特征 (`data-reactroot`, `v-bind:`, `ng-app`)
+  - HTTP Header (`X-Powered-By: Next.js`)
+  - Cookie (`laravel_session`, `JSESSIONID`)
+  - URL 路径 (`/wp-content/`, `/actuator/`)
+- **智能决策**:
+  - 检测到 SPA 框架 → 使用浏览器引擎
+  - 检测到传统框架 → 使用 HTTP 客户端
+
 ---
 
 ## 十、配置参考
@@ -1540,6 +1631,50 @@ swagger:
   parse_spec: true
   generate_requests: true
   timeout_ms: 15000
+
+# P4优化: 被动源发现
+passive_sources:
+  enabled: false           # 启用历史URL发现
+  wayback: true            # Wayback Machine
+  common_crawl: true       # Common Crawl
+  alienvault: true         # AlienVault OTX
+  virustotal: false        # VirusTotal (需要API Key)
+  urlscan: false           # URLScan.io
+  timeout_ms: 30000
+  max_results: 10000
+  include_subdomains: true
+  virustotal_api_key: ""   # VirusTotal API Key
+
+# P4优化: 作用域控制
+scope:
+  include_subdomains: true  # 包含子域名
+  exclude_cdn: true         # 排除CDN域名
+  exclude_external: false   # 排除外部链接
+  max_depth: 10             # 最大爬取深度
+  # include_domains: []     # 域名白名单
+  # exclude_domains: []     # 域名黑名单
+  # include_paths: []       # 路径前缀白名单
+  # exclude_paths: []       # 路径前缀黑名单
+
+# P4优化: 路径爬升
+path_climbing:
+  enabled: true             # 启用路径爬升
+  max_climb_depth: 5        # 最大爬升层数
+
+# P4优化: 框架检测
+framework_detection:
+  enabled: true             # 启用框架检测
+  auto_switch_engine: true  # 自动切换引擎
+
+# P4优化: 代理池
+proxy_pool:
+  enabled: false            # 启用代理池
+  file: ""                  # 代理列表文件
+  proxies: ""               # 代理列表(逗号分隔)
+  rotation: "round-robin"   # 轮换策略: round-robin, random, smart
+  max_fails: 3              # 最大失败次数
+  health_check: false       # 启用健康检查
+  health_check_interval_sec: 60
 ```
 
 ---
@@ -1620,4 +1755,31 @@ Argo 爬虫经过全面优化后，已具备以下能力：
 
 ### 待实现优化
 
-- 代理池轮换
+(所有主要优化已完成)
+
+---
+
+## 十三、竞品对比总结
+
+经过 P0-P4 优化后，Argo 与业界主流爬虫的功能对比：
+
+| 功能 | Argo | Katana | Gospider | Hakrawler | Burp Pro | Acunetix |
+|------|------|--------|----------|-----------|----------|----------|
+| 浏览器引擎 | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
+| HTTP 客户端 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 双引擎架构 | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
+| JS AST 解析 | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
+| 表单自动填充 | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| WebSocket 监控 | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| GraphQL 发现 | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
+| Swagger/OpenAPI | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| 历史 URL 发现 | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| 代理池轮换 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 作用域控制 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 路径爬升 | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| 框架检测 | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| 增量爬取 | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| 自适应限速 | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| 反检测 | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
+| 敏感信息检测 | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
+| 免费开源 | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |

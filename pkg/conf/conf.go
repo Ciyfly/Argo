@@ -73,6 +73,34 @@ swagger:
   parse_spec: true # 解析规范提取端点
   generate_requests: true # 生成示例请求
   timeout_ms: 15000 # 请求超时(毫秒)
+passive_sources:
+  enabled: false # 是否启用被动源发现(Wayback/CommonCrawl等)
+  wayback: true # 查询 Wayback Machine
+  common_crawl: true # 查询 Common Crawl
+  alienvault: true # 查询 AlienVault OTX
+  virustotal: false # 查询 VirusTotal(需要API Key)
+  urlscan: false # 查询 URLScan.io
+  timeout_ms: 30000 # 请求超时(毫秒)
+  max_results: 10000 # 每个源最大结果数
+  include_subdomains: true # 包含子域名
+scope:
+  include_subdomains: true # 包含子域名
+  exclude_cdn: true # 排除 CDN 域名
+  exclude_external: false # 排除外部链接
+  max_depth: 10 # 最大爬取深度
+path_climbing:
+  enabled: true # 是否启用路径爬升
+  max_climb_depth: 5 # 最大爬升层数
+framework_detection:
+  enabled: true # 是否启用框架检测
+  auto_switch_engine: true # 检测到SPA时自动切换到浏览器引擎
+proxy_pool:
+  enabled: false # 是否启用代理池
+  file: "" # 代理列表文件路径
+  rotation: "round-robin" # 轮换策略: round-robin, random, smart
+  max_fails: 3 # 最大失败次数后移除
+  health_check: false # 是否启用健康检查
+  health_check_interval_sec: 60 # 健康检查间隔(秒)
 
 `
 
@@ -105,6 +133,16 @@ type Conf struct {
 	GraphQLConf GraphQLConf `yaml:"graphql"`
 	// P3优化: Swagger/OpenAPI 配置
 	SwaggerConf SwaggerConf `yaml:"swagger"`
+	// P4优化: 被动源发现配置
+	PassiveSourceConf PassiveSourceConf `yaml:"passive_sources"`
+	// P4优化: 作用域控制配置
+	ScopeConf ScopeConf `yaml:"scope"`
+	// P4优化: 路径爬升配置
+	PathClimbingConf PathClimbingConf `yaml:"path_climbing"`
+	// P4优化: 框架检测配置
+	FrameworkDetectionConf FrameworkDetectionConf `yaml:"framework_detection"`
+	// P4优化: 代理池配置
+	ProxyPoolConf ProxyPoolConf `yaml:"proxy_pool"`
 }
 
 // DualEngineConf 双引擎配置
@@ -154,6 +192,58 @@ type SwaggerConf struct {
 	ParseSpec        bool `yaml:"parse_spec"`        // 解析规范提取端点
 	GenerateRequests bool `yaml:"generate_requests"` // 生成示例请求
 	TimeoutMs        int  `yaml:"timeout_ms"`        // 请求超时(毫秒)
+}
+
+// PassiveSourceConf 被动源发现配置 (P4优化)
+type PassiveSourceConf struct {
+	Enabled           bool   `yaml:"enabled"`            // 是否启用被动源发现
+	Wayback           bool   `yaml:"wayback"`            // 查询 Wayback Machine
+	CommonCrawl       bool   `yaml:"common_crawl"`       // 查询 Common Crawl
+	AlienVault        bool   `yaml:"alienvault"`         // 查询 AlienVault OTX
+	VirusTotal        bool   `yaml:"virustotal"`         // 查询 VirusTotal
+	URLScan           bool   `yaml:"urlscan"`            // 查询 URLScan.io
+	TimeoutMs         int    `yaml:"timeout_ms"`         // 请求超时(毫秒)
+	MaxResults        int    `yaml:"max_results"`        // 每个源最大结果数
+	IncludeSubdomains bool   `yaml:"include_subdomains"` // 包含子域名
+	VirusTotalAPIKey  string `yaml:"virustotal_api_key"` // VirusTotal API Key
+}
+
+// ScopeConf 作用域控制配置 (P4优化)
+type ScopeConf struct {
+	IncludeDomains    []string `yaml:"include_domains"`    // 包含的域名
+	IncludeSubdomains bool     `yaml:"include_subdomains"` // 包含子域名
+	IncludePaths      []string `yaml:"include_paths"`      // 包含的路径前缀
+	IncludePatterns   []string `yaml:"include_patterns"`   // 包含的正则模式
+	ExcludeDomains    []string `yaml:"exclude_domains"`    // 排除的域名
+	ExcludePaths      []string `yaml:"exclude_paths"`      // 排除的路径前缀
+	ExcludePatterns   []string `yaml:"exclude_patterns"`   // 排除的正则模式
+	ExcludeExtensions []string `yaml:"exclude_extensions"` // 排除的扩展名
+	ExcludeCDN        bool     `yaml:"exclude_cdn"`        // 排除 CDN 域名
+	ExcludeExternal   bool     `yaml:"exclude_external"`   // 排除外部链接
+	MaxDepth          int      `yaml:"max_depth"`          // 最大爬取深度
+}
+
+// PathClimbingConf 路径爬升配置 (P4优化)
+type PathClimbingConf struct {
+	Enabled       bool `yaml:"enabled"`         // 是否启用路径爬升
+	MaxClimbDepth int  `yaml:"max_climb_depth"` // 最大爬升层数
+}
+
+// FrameworkDetectionConf 框架检测配置 (P4优化)
+type FrameworkDetectionConf struct {
+	Enabled          bool `yaml:"enabled"`            // 是否启用框架检测
+	AutoSwitchEngine bool `yaml:"auto_switch_engine"` // 检测到SPA时自动切换到浏览器引擎
+}
+
+// ProxyPoolConf 代理池配置 (P4优化)
+type ProxyPoolConf struct {
+	Enabled                bool   `yaml:"enabled"`                   // 是否启用代理池
+	File                   string `yaml:"file"`                      // 代理列表文件路径
+	Proxies                string `yaml:"proxies"`                   // 代理列表(逗号分隔)
+	Rotation               string `yaml:"rotation"`                  // 轮换策略: round-robin, random, smart
+	MaxFails               int    `yaml:"max_fails"`                 // 最大失败次数后移除
+	HealthCheck            bool   `yaml:"health_check"`              // 是否启用健康检查
+	HealthCheckIntervalSec int    `yaml:"health_check_interval_sec"` // 健康检查间隔(秒)
 }
 
 // 保存的格式

@@ -84,6 +84,14 @@ type EngineInfo struct {
 	GraphQLDiscoverer *GraphQLDiscoverer
 	// P3优化: Swagger/OpenAPI 发现器
 	SwaggerDiscoverer *SwaggerDiscoverer
+	// P4优化: 被动源发现器
+	PassiveSourceDiscoverer *PassiveSourceDiscoverer
+	// P4优化: 作用域控制器
+	ScopeController *ScopeController
+	// P4优化: 路径爬升器
+	PathClimber *PathClimber
+	// P4优化: 框架检测器
+	FrameworkDetector *FrameworkDetector
 
 	Scheduler *Scheduler
 
@@ -127,6 +135,11 @@ type MetricsSummary struct {
 	IncrementalStats *IncrementalStats      `json:"incremental_stats,omitempty"`
 	GraphQLStats     *GraphQLStats          `json:"graphql_stats,omitempty"`
 	SwaggerStats     *SwaggerStats          `json:"swagger_stats,omitempty"`
+	// P4优化统计
+	PassiveSourceStats *PassiveSourceStats `json:"passive_source_stats,omitempty"`
+	ScopeStats         *ScopeStats         `json:"scope_stats,omitempty"`
+	PathClimberStats   *PathClimberStats   `json:"path_climber_stats,omitempty"`
+	FrameworkStats     *FrameworkStats     `json:"framework_stats,omitempty"`
 }
 
 type EngineEvent struct {
@@ -302,6 +315,80 @@ func InitEngine(target string) *EngineInfo {
 	}
 	engineInfo.SwaggerDiscoverer = NewSwaggerDiscoverer(engineInfo, swaggerCfg)
 
+	// P4优化: 初始化被动源发现器
+	passiveSourceCfg := DefaultPassiveSourceConfig()
+	if conf.GlobalConfig.PassiveSourceConf.Enabled {
+		passiveSourceCfg.Enabled = true
+	}
+	if conf.GlobalConfig.PassiveSourceConf.Wayback {
+		passiveSourceCfg.Wayback = true
+	}
+	if conf.GlobalConfig.PassiveSourceConf.CommonCrawl {
+		passiveSourceCfg.CommonCrawl = true
+	}
+	if conf.GlobalConfig.PassiveSourceConf.AlienVault {
+		passiveSourceCfg.AlienVault = true
+	}
+	if conf.GlobalConfig.PassiveSourceConf.VirusTotal {
+		passiveSourceCfg.VirusTotal = true
+	}
+	if conf.GlobalConfig.PassiveSourceConf.URLScan {
+		passiveSourceCfg.URLScan = true
+	}
+	if conf.GlobalConfig.PassiveSourceConf.TimeoutMs > 0 {
+		passiveSourceCfg.Timeout = time.Duration(conf.GlobalConfig.PassiveSourceConf.TimeoutMs) * time.Millisecond
+	}
+	if conf.GlobalConfig.PassiveSourceConf.MaxResults > 0 {
+		passiveSourceCfg.MaxResults = conf.GlobalConfig.PassiveSourceConf.MaxResults
+	}
+	passiveSourceCfg.IncludeSubdomains = conf.GlobalConfig.PassiveSourceConf.IncludeSubdomains
+	if conf.GlobalConfig.PassiveSourceConf.VirusTotalAPIKey != "" {
+		passiveSourceCfg.VirusTotalAPIKey = conf.GlobalConfig.PassiveSourceConf.VirusTotalAPIKey
+	}
+	engineInfo.PassiveSourceDiscoverer = NewPassiveSourceDiscoverer(engineInfo, passiveSourceCfg)
+
+	// P4优化: 初始化作用域控制器
+	scopeCfg := DefaultScopeConfig()
+	if len(conf.GlobalConfig.ScopeConf.IncludeDomains) > 0 {
+		scopeCfg.IncludeDomains = conf.GlobalConfig.ScopeConf.IncludeDomains
+	}
+	scopeCfg.IncludeSubdomains = conf.GlobalConfig.ScopeConf.IncludeSubdomains
+	if len(conf.GlobalConfig.ScopeConf.IncludePaths) > 0 {
+		scopeCfg.IncludePaths = conf.GlobalConfig.ScopeConf.IncludePaths
+	}
+	if len(conf.GlobalConfig.ScopeConf.IncludePatterns) > 0 {
+		scopeCfg.IncludePatterns = conf.GlobalConfig.ScopeConf.IncludePatterns
+	}
+	if len(conf.GlobalConfig.ScopeConf.ExcludeDomains) > 0 {
+		scopeCfg.ExcludeDomains = conf.GlobalConfig.ScopeConf.ExcludeDomains
+	}
+	if len(conf.GlobalConfig.ScopeConf.ExcludePaths) > 0 {
+		scopeCfg.ExcludePaths = conf.GlobalConfig.ScopeConf.ExcludePaths
+	}
+	if len(conf.GlobalConfig.ScopeConf.ExcludePatterns) > 0 {
+		scopeCfg.ExcludePatterns = conf.GlobalConfig.ScopeConf.ExcludePatterns
+	}
+	if len(conf.GlobalConfig.ScopeConf.ExcludeExtensions) > 0 {
+		scopeCfg.ExcludeExtensions = conf.GlobalConfig.ScopeConf.ExcludeExtensions
+	}
+	scopeCfg.ExcludeCDN = conf.GlobalConfig.ScopeConf.ExcludeCDN
+	scopeCfg.ExcludeExternal = conf.GlobalConfig.ScopeConf.ExcludeExternal
+	if conf.GlobalConfig.ScopeConf.MaxDepth > 0 {
+		scopeCfg.MaxDepth = conf.GlobalConfig.ScopeConf.MaxDepth
+	}
+	engineInfo.ScopeController = NewScopeController(target, scopeCfg)
+
+	// P4优化: 初始化路径爬升器
+	pathClimberCfg := DefaultPathClimberConfig()
+	pathClimberCfg.Enabled = conf.GlobalConfig.PathClimbingConf.Enabled
+	if conf.GlobalConfig.PathClimbingConf.MaxClimbDepth > 0 {
+		pathClimberCfg.MaxClimbDepth = conf.GlobalConfig.PathClimbingConf.MaxClimbDepth
+	}
+	engineInfo.PathClimber = NewPathClimber(pathClimberCfg)
+
+	// P4优化: 初始化框架检测器
+	engineInfo.FrameworkDetector = NewFrameworkDetector()
+
 	// 初始化泛化模块
 	engineInfo.InitNormalize()
 	// 初始化 结果处理模块
@@ -459,6 +546,30 @@ func (ei *EngineInfo) Start() error {
 		}()
 	}
 
+	// P4优化: 被动源发现 (Wayback, CommonCrawl 等历史URL)
+	if ei.PassiveSourceDiscoverer != nil && ei.PassiveSourceDiscoverer.config.Enabled {
+		go func() {
+			log.Logger.Infof("passive sources: starting historical URL discovery for %s", ei.HostName)
+			urls := ei.PassiveSourceDiscoverer.DiscoverFromDomain(ei.HostName)
+			if len(urls) > 0 {
+				log.Logger.Infof("passive sources: discovered %d historical URLs", len(urls))
+				// 将发现的 URL 提交给爬虫
+				urlInfos := ei.PassiveSourceDiscoverer.ExportForCrawler()
+				for _, uif := range urlInfos {
+					// 使用作用域控制器过滤
+					if ei.ScopeController != nil {
+						inScope, _ := ei.ScopeController.IsInScope(uif.Url, uif.Depth)
+						if !inScope {
+							continue
+						}
+					}
+					ei.PushStaticUrl(uif)
+				}
+				log.Logger.Infof("passive sources: submitted %d URLs to crawler", len(urlInfos))
+			}
+		}()
+	}
+
 	for _, seed := range conf.GlobalConfig.SeedList {
 		if seed == "" {
 			continue
@@ -514,6 +625,16 @@ func (ei *EngineInfo) prepareUrl(uif *UrlInfo) bool {
 		uif.Url = canonical
 		uif.Hash = normalizeation(canonical, "GET")
 
+		// P4优化: 作用域控制检查
+		if ei.ScopeController != nil {
+			inScope, reason := ei.ScopeController.IsInScope(canonical, uif.Depth)
+			if !inScope {
+				log.Logger.Debugf("[scope skip] url=%s reason=%s", canonical, reason)
+				atomic.AddInt64(&ei.UrlsDropped, 1)
+				return false
+			}
+		}
+
 		// P3优化: 增量爬取检查
 		if ei.IncrementalCrawler != nil && ei.IncrementalCrawler.config.Enabled {
 			shouldCrawl, reason := ei.IncrementalCrawler.ShouldCrawl(canonical, uif.Hash)
@@ -525,6 +646,22 @@ func (ei *EngineInfo) prepareUrl(uif *UrlInfo) bool {
 			}
 			// 添加到待爬取队列
 			ei.IncrementalCrawler.AddPendingURL(canonical, uif.Hash, uif.Depth, uif.SourceUrl, 0)
+		}
+
+		// P4优化: 路径爬升 - 为深层路径生成父路径URL
+		if ei.PathClimber != nil && ei.PathClimber.config.Enabled {
+			parentURLs := ei.PathClimber.ClimbPath(canonical)
+			for _, parentURL := range parentURLs {
+				// 异步提交父路径 (避免递归)
+				go func(pURL string) {
+					ei.PushStaticUrl(&UrlInfo{
+						Url:        pURL,
+						SourceType: "path_climbing",
+						SourceUrl:  canonical,
+						Depth:      uif.Depth,
+					})
+				}(parentURL)
+			}
 		}
 
 		return true
@@ -615,6 +752,30 @@ func (ei *EngineInfo) MetricsSummary() MetricsSummary {
 	if ei.SwaggerDiscoverer != nil {
 		stats := ei.SwaggerDiscoverer.GetStats()
 		summary.SwaggerStats = &stats
+	}
+
+	// P4优化: 添加被动源统计
+	if ei.PassiveSourceDiscoverer != nil {
+		stats := ei.PassiveSourceDiscoverer.GetStats()
+		summary.PassiveSourceStats = &stats
+	}
+
+	// P4优化: 添加作用域统计
+	if ei.ScopeController != nil {
+		stats := ei.ScopeController.GetStats()
+		summary.ScopeStats = &stats
+	}
+
+	// P4优化: 添加路径爬升统计
+	if ei.PathClimber != nil {
+		stats := ei.PathClimber.GetStats()
+		summary.PathClimberStats = &stats
+	}
+
+	// P4优化: 添加框架检测统计
+	if ei.FrameworkDetector != nil {
+		stats := ei.FrameworkDetector.GetStats()
+		summary.FrameworkStats = &stats
 	}
 
 	return summary

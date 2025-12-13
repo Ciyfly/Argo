@@ -80,6 +80,8 @@ type EngineInfo struct {
 	WebSocketTracker *WebSocketTracker
 	// P3优化: 增量爬取
 	IncrementalCrawler *IncrementalCrawler
+	// P3优化: GraphQL 发现器
+	GraphQLDiscoverer *GraphQLDiscoverer
 
 	Scheduler *Scheduler
 
@@ -121,6 +123,7 @@ type MetricsSummary struct {
 	DualEngineStats  *DualEngineStats       `json:"dual_engine_stats,omitempty"`
 	WebSocketStats   *WebSocketStats        `json:"websocket_stats,omitempty"`
 	IncrementalStats *IncrementalStats      `json:"incremental_stats,omitempty"`
+	GraphQLStats     *GraphQLStats          `json:"graphql_stats,omitempty"`
 }
 
 type EngineEvent struct {
@@ -258,6 +261,25 @@ func InitEngine(target string) *EngineInfo {
 	incCfg.ResumeFromPending = conf.GlobalConfig.IncrementalConf.ResumeFromPending
 	engineInfo.IncrementalCrawler = NewIncrementalCrawler(engineInfo, incCfg)
 
+	// P3优化: 初始化 GraphQL 发现器
+	gqlCfg := DefaultGraphQLConfig()
+	if conf.GlobalConfig.GraphQLConf.Enabled {
+		gqlCfg.Enabled = true
+	}
+	if conf.GlobalConfig.GraphQLConf.AutoDiscover {
+		gqlCfg.AutoDiscover = true
+	}
+	if conf.GlobalConfig.GraphQLConf.EnableIntrospection {
+		gqlCfg.EnableIntrospection = true
+	}
+	if conf.GlobalConfig.GraphQLConf.MaxDepth > 0 {
+		gqlCfg.MaxDepth = conf.GlobalConfig.GraphQLConf.MaxDepth
+	}
+	if conf.GlobalConfig.GraphQLConf.TimeoutMs > 0 {
+		gqlCfg.Timeout = time.Duration(conf.GlobalConfig.GraphQLConf.TimeoutMs) * time.Millisecond
+	}
+	engineInfo.GraphQLDiscoverer = NewGraphQLDiscoverer(engineInfo, gqlCfg)
+
 	// 初始化泛化模块
 	engineInfo.InitNormalize()
 	// 初始化 结果处理模块
@@ -384,6 +406,20 @@ func (ei *EngineInfo) Start() error {
 	}
 	// 等待 metadata 爬取完成
 	metadataWg.Wait()
+
+	// P3优化: GraphQL 端点发现
+	if ei.GraphQLDiscoverer != nil && ei.GraphQLDiscoverer.config.Enabled {
+		go func() {
+			endpoints := ei.GraphQLDiscoverer.DiscoverFromBaseURL(ei.Target)
+			if len(endpoints) > 0 {
+				log.Logger.Infof("graphql: discovered %d endpoints", len(endpoints))
+				// 对支持内省的端点执行内省查询
+				if ei.GraphQLDiscoverer.config.EnableIntrospection {
+					ei.GraphQLDiscoverer.IntrospectAll()
+				}
+			}
+		}()
+	}
 
 	for _, seed := range conf.GlobalConfig.SeedList {
 		if seed == "" {
@@ -529,6 +565,12 @@ func (ei *EngineInfo) MetricsSummary() MetricsSummary {
 	if ei.IncrementalCrawler != nil {
 		stats := ei.IncrementalCrawler.GetStatistics()
 		summary.IncrementalStats = stats
+	}
+
+	// P3优化: 添加 GraphQL 统计
+	if ei.GraphQLDiscoverer != nil {
+		stats := ei.GraphQLDiscoverer.GetStats()
+		summary.GraphQLStats = &stats
 	}
 
 	return summary

@@ -61,6 +61,12 @@ incremental:
   max_age_hours: 24 # URL最大有效期(小时),超过后重新爬取
   auto_save_interval_min: 5 # 自动保存间隔(分钟)
   resume_from_pending: true # 是否从未完成的URL继续
+graphql:
+  enabled: true # 是否启用 GraphQL 发现
+  auto_discover: true # 自动发现端点
+  enable_introspection: true # 启用内省查询
+  max_depth: 3 # 内省最大深度
+  timeout_ms: 10000 # 请求超时(毫秒)
 
 `
 
@@ -89,6 +95,8 @@ type Conf struct {
 	WebSocketConf WebSocketConf `yaml:"websocket"`
 	// P3优化: 增量爬取配置
 	IncrementalConf IncrementalConf `yaml:"incremental"`
+	// P3优化: GraphQL 配置
+	GraphQLConf GraphQLConf `yaml:"graphql"`
 }
 
 // DualEngineConf 双引擎配置
@@ -120,6 +128,15 @@ type IncrementalConf struct {
 	MaxAgeHours         int    `yaml:"max_age_hours"`          // URL最大有效期(小时)
 	AutoSaveIntervalMin int    `yaml:"auto_save_interval_min"` // 自动保存间隔(分钟)
 	ResumeFromPending   bool   `yaml:"resume_from_pending"`    // 是否从未完成的URL继续
+}
+
+// GraphQLConf GraphQL 发现配置
+type GraphQLConf struct {
+	Enabled             bool `yaml:"enabled"`              // 是否启用 GraphQL 发现
+	AutoDiscover        bool `yaml:"auto_discover"`        // 自动发现端点
+	EnableIntrospection bool `yaml:"enable_introspection"` // 启用内省查询
+	MaxDepth            int  `yaml:"max_depth"`            // 内省最大深度
+	TimeoutMs           int  `yaml:"timeout_ms"`           // 请求超时(毫秒)
 }
 
 // 保存的格式

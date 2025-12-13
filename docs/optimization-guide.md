@@ -1345,7 +1345,7 @@ browser_pool:
 | **P2** | 敏感信息检测 | 安全增强 | 中 | ✅ 已完成 |
 | **P3** | WebSocket 支持 | 完整性 | 中 | ✅ 已完成 |
 | **P3** | 增量爬取 | 效率提升 | 中 | ✅ 已完成 |
-| **P3** | GraphQL 支持 | API 覆盖 | 中 | 待实现 |
+| **P3** | GraphQL 支持 | API 覆盖 | 中 | ✅ 已完成 |
 
 ---
 
@@ -1451,6 +1451,22 @@ browser_pool:
   - 失败URL记录
   - 爬取统计信息
 
+#### 3. GraphQL 端点发现 (GraphQL Discovery)
+- **文件**: `pkg/engine/graphql.go`
+- **功能**:
+  - 自动发现 GraphQL 端点 (常见路径扫描)
+  - 内省查询获取完整 Schema
+  - 从 JavaScript 提取 GraphQL 查询
+  - 生成示例查询
+  - Schema 解析 (类型、字段、参数、枚举)
+- **配置**: `graphql.enabled`, `graphql.auto_discover`, `graphql.enable_introspection`
+- **发现路径**: `/graphql`, `/gql`, `/api/graphql`, `/v1/graphql` 等
+- **提取内容**:
+  - 端点 URL 和验证状态
+  - 内省 Schema (Query/Mutation/Subscription 类型)
+  - JS 中的 gql 模板查询
+  - JSON 中的 query 字段
+
 ---
 
 ## 十、配置参考
@@ -1489,6 +1505,13 @@ incremental:
   max_age_hours: 24
   auto_save_interval_min: 5
   resume_from_pending: true
+
+graphql:
+  enabled: true
+  auto_discover: true
+  enable_introspection: true
+  max_depth: 3
+  timeout_ms: 10000
 ```
 
 ---
@@ -1532,6 +1555,7 @@ Argo 爬虫经过全面优化后，已具备以下能力：
    - WebSocket 连接监控和消息捕获
    - 增量爬取和断点续爬
    - 智能深度控制
+   - GraphQL 端点发现和内省
    - 全面的 Metrics 统计输出
 
 ### 架构改进
@@ -1554,7 +1578,8 @@ Argo 爬虫经过全面优化后，已具备以下能力：
     │ • API 端点        │       │ • SPA 页面          │
     │ • JSON/XML        │       │ • 动态渲染          │
     │ • 静态资源        │       │ • WebSocket         │
-    │ • 自适应限速      │       │ • 自动交互          │
+    │ • GraphQL 发现    │       │ • 自动交互          │
+    │ • 自适应限速      │       │ • GraphQL 内省      │
     └─────────┬─────────┘       └──────────┬──────────┘
               │                             │
               └──────────────┬──────────────┘
@@ -1566,5 +1591,4 @@ Argo 爬虫经过全面优化后，已具备以下能力：
 
 ### 待实现优化
 
-- GraphQL 内省支持
 - 代理池轮换

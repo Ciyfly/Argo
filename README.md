@@ -178,7 +178,21 @@ http://192.168.192.128:8080/
 
 ### 多平台构建
 
-使用 `scripts/build.sh` 可以构建不同平台的可执行文件，`-h`（或 `-p`/`--platforms`）接受逗号分隔的 `GOOS/GOARCH` 列表，例如同时输出 Linux 与 Windows 版本：
+使用 `scripts/build.sh` 可以构建不同平台的可执行文件。默认不带参数时构建 `linux/amd64`：
+
+```
+./scripts/build.sh
+```
+
+支持平台快捷参数：
+
+```
+./scripts/build.sh windows   # windows/amd64
+./scripts/build.sh arm64     # linux/arm64
+./scripts/build.sh all       # 全版本：linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64
+```
+
+也可以继续使用 `-h`（或 `-p`/`--platforms`）传入逗号分隔的 `GOOS/GOARCH` 列表，例如同时输出 Linux 与 Windows 版本：
 
 ```
 ./scripts/build.sh -h linux/amd64,windows/amd64

@@ -54,3 +54,59 @@ func TestCanonicalizeURL_RelativeFileNotBareDomain(t *testing.T) {
 		})
 	}
 }
+
+func TestCanonicalizeURL_RejectsMetaLikeDirectives(t *testing.T) {
+	tests := []struct {
+		raw  string
+		base string
+	}{
+		{"width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no", "http://10.199.0.134/"},
+		{"IE=edge,chrome=1", "http://10.199.0.134/"},
+	}
+
+	for _, tt := range tests {
+		if got, err := CanonicalizeURL(tt.raw, tt.base); err == nil {
+			t.Fatalf("expected error for %q, got=%q", tt.raw, got)
+		}
+	}
+}
+
+func TestCanonicalizeURL_CollapseRepeatedStaticSegments(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		base string
+		want string
+	}{
+		{
+			name: "static under /static/ should not become /static/static",
+			raw:  "static/css",
+			base: "http://10.199.0.134/static/",
+			want: "http://10.199.0.134/static/css",
+		},
+		{
+			name: "static under app subpath should keep prefix",
+			raw:  "static/css",
+			base: "http://10.199.0.134/qmallportal/static/",
+			want: "http://10.199.0.134/qmallportal/static/css",
+		},
+		{
+			name: "multiple repeats should collapse to single static",
+			raw:  "static/static/static/css",
+			base: "http://10.199.0.134/qmallportal/static/",
+			want: "http://10.199.0.134/qmallportal/static/css",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := CanonicalizeURL(tt.raw, tt.base)
+			if err != nil {
+				t.Fatalf("CanonicalizeURL(%q, %q) unexpected error: %v", tt.raw, tt.base, err)
+			}
+			if got != tt.want {
+				t.Fatalf("CanonicalizeURL(%q, %q) = %q, want %q", tt.raw, tt.base, got, tt.want)
+			}
+		})
+	}
+}

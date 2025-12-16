@@ -223,6 +223,34 @@ func ParseHtmlWithSource(htmlStr, currentUrl string) []DiscoveredURL {
 	var tag string
 	var inScript bool
 	var scriptContent strings.Builder
+	// 解析 <base href="...">，用于修正相对 URL 的解析基准，避免 SPA fallback 场景下的路径无限叠加。
+	// 注意：<base> 本身不是可爬 URL，这里仅作为“解析基准”使用。
+	resolveBaseURL := currentUrl
+	baseHrefApplied := false
+
+	tryApplyBaseHref := func(t xhtml.Token) {
+		if baseHrefApplied {
+			return
+		}
+		var href string
+		for _, a := range t.Attr {
+			if strings.EqualFold(a.Key, "href") {
+				href = strings.TrimSpace(a.Val)
+				break
+			}
+		}
+		if href == "" {
+			return
+		}
+		// base href 的解析必须以当前文档 URL 为基准，而不是已被 base 改写后的 resolveBaseURL。
+		if resolved := HandlerUrl(href, currentUrl); resolved != "" {
+			resolveBaseURL = resolved
+			baseHrefApplied = true
+			if log.Logger != nil {
+				log.Logger.Debugf("html base href applied: %s -> %s", href, resolved)
+			}
+		}
+	}
 
 	appendURLs := func(urls []string, sourceType string) {
 		for _, u := range urls {
@@ -242,25 +270,31 @@ func ParseHtmlWithSource(htmlStr, currentUrl string) []DiscoveredURL {
 			t := tkn.Token()
 			tag = strings.ToLower(t.Data)
 
+			// <base href="..."> 仅用于修正解析基准，不作为可爬 URL 输出
+			if tag == "base" {
+				tryApplyBaseHref(t)
+				continue
+			}
+
 			// 检查是否进入 script 标签
 			if tag == "script" {
 				inScript = true
 				scriptContent.Reset()
 				// 解析 script 标签的 src 等属性
-				appendURLs(getUrlByTag(t, currentUrl), "html_attr")
+				appendURLs(getUrlByTag(t, resolveBaseURL), "html_attr")
 				continue
 			}
 
 			// 解析需要提取 URL 的标签属性
 			if urlTags[tag] {
-				appendURLs(getUrlByTag(t, currentUrl), "html_attr")
+				appendURLs(getUrlByTag(t, resolveBaseURL), "html_attr")
 			}
 
 			// 解析所有标签的 data-* 属性 (可能包含 URL)
 			for _, a := range t.Attr {
 				key := strings.ToLower(a.Key)
 				if strings.HasPrefix(key, "data-") && urlAttributes[key] {
-					if resolved := HandlerUrl(a.Val, currentUrl); resolved != "" {
+					if resolved := HandlerUrl(a.Val, resolveBaseURL); resolved != "" {
 						appendURLs([]string{resolved}, "html_attr")
 					}
 				}
@@ -272,7 +306,7 @@ func ParseHtmlWithSource(htmlStr, currentUrl string) []DiscoveredURL {
 				// 解析内联 script 内容中的 URL
 				content := scriptContent.String()
 				if content != "" {
-					appendURLs(HandlerUrls(parseJs(content), currentUrl), "js_inline")
+					appendURLs(HandlerUrls(parseJs(content), resolveBaseURL), "js_inline")
 				}
 				inScript = false
 				scriptContent.Reset()
@@ -284,18 +318,22 @@ func ParseHtmlWithSource(htmlStr, currentUrl string) []DiscoveredURL {
 				// 收集 script 内容
 				scriptContent.WriteString(text.Data)
 			} else {
-				appendURLs(HandlerUrls(findUrlMatch(text.String()), currentUrl), "html_text")
+				appendURLs(HandlerUrls(findUrlMatch(text.String()), resolveBaseURL), "html_text")
 			}
 
 		case tt == xhtml.CommentToken:
 			comment := tkn.Token()
-			appendURLs(HandlerUrls(findUrlMatch(comment.String()), currentUrl), "html_comment")
+			appendURLs(HandlerUrls(findUrlMatch(comment.String()), resolveBaseURL), "html_comment")
 
 		case tt == xhtml.SelfClosingTagToken:
 			t := tkn.Token()
 			tag = strings.ToLower(t.Data)
+			if tag == "base" {
+				tryApplyBaseHref(t)
+				continue
+			}
 			if urlTags[tag] {
-				appendURLs(getUrlByTag(t, currentUrl), "html_attr")
+				appendURLs(getUrlByTag(t, resolveBaseURL), "html_attr")
 			}
 		}
 	}

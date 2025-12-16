@@ -310,7 +310,32 @@ func (ja *JSluiceAnalyzer) isValidURL(urlStr string) bool {
 		return false
 	}
 
+	// 经验性过滤：要求具备“URL/路径”特征，避免把 viewport/X-UA-Compatible 等配置串误当成 URL。
+	// 允许：绝对 URL、协议相对、根相对、相对路径(含 /)、文件/域名(含 .)、查询(含 ?)
+	if !looksLikeURLish(urlStr) {
+		return false
+	}
+
 	return true
+}
+
+func looksLikeURLish(s string) bool {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" {
+		return false
+	}
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "//") {
+		return true
+	}
+	if strings.HasPrefix(trimmed, "/") || strings.HasPrefix(trimmed, "./") || strings.HasPrefix(trimmed, "../") {
+		return true
+	}
+	// 只要包含路径/文件/查询特征，就认为“可能是 URL”
+	if strings.ContainsAny(trimmed, "/.?") || strings.Contains(trimmed, "?") {
+		return true
+	}
+	return false
 }
 
 // isAPIEndpoint 判断是否为 API 端点

@@ -1,6 +1,7 @@
 package static
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -50,6 +51,38 @@ func TestJSluiceAnalyzer_LocationAssignment(t *testing.T) {
 	t.Logf("Found %d URLs from location assignments", result.TotalURLs)
 	for _, u := range result.URLs {
 		t.Logf("URL: %s, Type: %s", u.URL, u.Type)
+	}
+}
+
+func TestJSluiceAnalyzer_FiltersNonURLTokens(t *testing.T) {
+	analyzer := NewJSluiceAnalyzer(nil)
+
+	// 这些字符串在真实 SPA bundle 中经常出现（viewport/X-UA-Compatible/renderer 等），
+	// 但并不是 URL。这里用 location 赋值触发 jsluice 的 URL 采集，再验证过滤生效。
+	jsCode := `
+		document.location = 'width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no';
+		window.location.href = 'IE=edge,chrome=1';
+		location.assign('webkit');
+		fetch('/api/users');
+	`
+
+	result := analyzer.AnalyzeJS(jsCode)
+
+	for _, u := range result.URLs {
+		if u.URL == "webkit" || u.URL == "IE=edge,chrome=1" || strings.Contains(u.URL, "width=device-width") {
+			t.Fatalf("expected non-url token to be filtered, got: %q (type=%s)", u.URL, u.Type)
+		}
+	}
+
+	found := false
+	for _, u := range result.URLs {
+		if u.URL == "/api/users" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected api url to remain, got=%v", result.URLs)
 	}
 }
 

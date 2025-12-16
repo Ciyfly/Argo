@@ -12,6 +12,7 @@ var (
 	ErrSchemeDenied = errors.New("scheme not allowed")
 	ErrNoBase       = errors.New("relative url requires base")
 	ErrNoHost       = errors.New("host missing")
+	ErrNotURL       = errors.New("not url candidate")
 )
 
 // 常见“文件扩展名”，用于避免把 index.php / style.css 误判成裸域名。
@@ -73,6 +74,9 @@ func CanonicalizeURL(raw string, base string) (string, error) {
 	if schemeRejected(clean) {
 		return "", ErrSchemeDenied
 	}
+	if looksLikeNonURLDirective(clean) {
+		return "", ErrNotURL
+	}
 
 	var baseURL *url.URL
 	if base != "" {
@@ -132,10 +136,81 @@ func CanonicalizeURL(raw string, base string) (string, error) {
 		return "", ErrNoHost
 	}
 	candidate.Fragment = ""
+	// 经验性防护：针对 SPA fallback + 相对静态资源路径导致的 /static/static/... 无限叠加，
+	// 仅折叠常见静态目录段的连续重复，避免产生无限多的“新路径”。
+	if collapsed := collapseRepeatedStaticSegments(candidate.Path); collapsed != candidate.Path {
+		candidate.Path = collapsed
+		candidate.RawPath = ""
+	}
 	if rawQuery := candidate.Query(); len(rawQuery) > 0 {
 		candidate.RawQuery = rawQuery.Encode()
 	}
 	return candidate.String(), nil
+}
+
+func looksLikeNonURLDirective(candidate string) bool {
+	trimmed := strings.TrimSpace(candidate)
+	if trimmed == "" {
+		return false
+	}
+	// 已经是明显的 URL / 路径，不做此类过滤
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "//") {
+		return false
+	}
+	if strings.HasPrefix(trimmed, "/") || strings.HasPrefix(trimmed, "./") || strings.HasPrefix(trimmed, "../") {
+		return false
+	}
+	// 例如：viewport / X-UA-Compatible / renderer 等 meta content 的值，通常包含 = 或 ,，
+	// 但不包含 URL 常见结构（/ . ?）
+	if (strings.Contains(trimmed, "=") || strings.Contains(trimmed, ",")) &&
+		!strings.ContainsAny(trimmed, "/.?") &&
+		!strings.Contains(trimmed, "?") {
+		return true
+	}
+	return false
+}
+
+var loopProneStaticDirs = map[string]struct{}{
+	"static": {},
+	"assets": {},
+	"public": {},
+	"dist":   {},
+	"build":  {},
+}
+
+func collapseRepeatedStaticSegments(path string) string {
+	if path == "" || path == "/" {
+		return path
+	}
+	hasTrailingSlash := strings.HasSuffix(path, "/")
+	segments := strings.Split(path, "/")
+	out := make([]string, 0, len(segments))
+	var last string
+
+	for _, seg := range segments {
+		if seg == "" {
+			continue
+		}
+		segLower := strings.ToLower(seg)
+		if segLower == last {
+			if _, ok := loopProneStaticDirs[segLower]; ok {
+				// 跳过连续重复的静态目录段，如 static/static
+				continue
+			}
+		}
+		out = append(out, seg)
+		last = segLower
+	}
+
+	if len(out) == 0 {
+		return "/"
+	}
+	collapsed := "/" + strings.Join(out, "/")
+	if hasTrailingSlash && collapsed != "/" && !strings.HasSuffix(collapsed, "/") {
+		collapsed += "/"
+	}
+	return collapsed
 }
 
 func sanitizeURLCandidate(raw string) string {

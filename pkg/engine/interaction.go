@@ -37,6 +37,11 @@ var interactionRegistry = map[string]interactionFactory{
 
 const defaultLoginInteractionTimeoutSeconds = 5
 
+type InteractionDiscoveredURL struct {
+	URL        string
+	SourceType string
+}
+
 func (ei *EngineInfo) InitInteractions() {
 	order := conf.GlobalConfig.AutoConf.Interactions
 	if len(order) == 0 {
@@ -73,7 +78,7 @@ func reorderInteractions(list []Interaction, priority []string) []Interaction {
 	return ordered
 }
 
-func (ei *EngineInfo) runInteractions(page *rod.Page, uif *UrlInfo, isHome bool, stageRecorder func(string), extendTimeout func(time.Duration)) []string {
+func (ei *EngineInfo) runInteractions(page *rod.Page, uif *UrlInfo, isHome bool, stageRecorder func(string), extendTimeout func(time.Duration)) []InteractionDiscoveredURL {
 	if len(ei.Interactions) == 0 || page == nil {
 		return nil
 	}
@@ -92,7 +97,7 @@ func (ei *EngineInfo) runInteractions(page *rod.Page, uif *UrlInfo, isHome bool,
 	}
 	runOrder := reorderInteractions(ei.Interactions, priority)
 
-	var collected []string
+	var collected []InteractionDiscoveredURL
 	for _, inter := range runOrder {
 		if stageRecorder != nil {
 			stageRecorder("interaction:" + inter.Name())
@@ -103,7 +108,21 @@ func (ei *EngineInfo) runInteractions(page *rod.Page, uif *UrlInfo, isHome bool,
 			continue
 		}
 		if len(urls) > 0 {
-			collected = append(collected, urls...)
+			sourceType := "interaction_" + inter.Name()
+			switch inter.Name() {
+			case "auto":
+				sourceType = SourceTypeInteractionAuto
+			case "login":
+				sourceType = SourceTypeInteractionLogin
+			case "playback":
+				sourceType = SourceTypeInteractionPlayback
+			}
+			for _, u := range urls {
+				if u == "" {
+					continue
+				}
+				collected = append(collected, InteractionDiscoveredURL{URL: u, SourceType: sourceType})
+			}
 		}
 		if stageRecorder != nil {
 			stageRecorder("interaction:" + inter.Name() + ":done")

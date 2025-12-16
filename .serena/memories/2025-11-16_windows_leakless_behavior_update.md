@@ -1,0 +1,1 @@
+2025-11-16：根据用户指令撤销 Windows 下自动禁用 leakless 的逻辑。pkg/engine/engine.go 现仅在配置 browser.disable_leakless=true 时关闭 leakless，并在 Windows 环境首次初始化浏览器时以 once 提示需要信任 leakless.exe 或暂时关闭杀软。configs/config.yml 与 pkg/conf/conf.go 的注释同步更新，README FAQ 改为建议用户放行 leakless，而非默认关闭。

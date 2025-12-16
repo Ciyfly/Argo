@@ -14,6 +14,55 @@ var (
 	ErrNoHost       = errors.New("host missing")
 )
 
+// 常见“文件扩展名”，用于避免把 index.php / style.css 误判成裸域名。
+// 说明：这里做的是经验性兜底，不追求覆盖所有后缀；主要目的是减少无效域名导致的 DNS/连接超时卡顿。
+var commonFileExtensions = map[string]struct{}{
+	"php":   {},
+	"asp":   {},
+	"aspx":  {},
+	"jsp":   {},
+	"cgi":   {},
+	"html":  {},
+	"htm":   {},
+	"css":   {},
+	"js":    {},
+	"json":  {},
+	"xml":   {},
+	"txt":   {},
+	"md":    {},
+	"map":   {},
+	"wasm":  {},
+	"png":   {},
+	"jpg":   {},
+	"jpeg":  {},
+	"gif":   {},
+	"svg":   {},
+	"ico":   {},
+	"webp":  {},
+	"bmp":   {},
+	"swf":   {},
+	"woff":  {},
+	"woff2": {},
+	"ttf":   {},
+	"eot":   {},
+	"otf":   {},
+	"pdf":   {},
+	"zip":   {},
+	"rar":   {},
+	"7z":    {},
+	"tar":   {},
+	"gz":    {},
+	"bz2":   {},
+	"xz":    {},
+	"mp4":   {},
+	"mp3":   {},
+	"avi":   {},
+	"mov":   {},
+	"wmv":   {},
+	"flv":   {},
+	"webm":  {},
+}
+
 // CanonicalizeURL sanitizes, resolves and normalizes a URL relative to base (if provided).
 // It returns an absolute http/https URL or an error describing why it was rejected.
 func CanonicalizeURL(raw string, base string) (string, error) {
@@ -141,9 +190,22 @@ func looksLikeBareDomain(candidate string) bool {
 	if strings.HasPrefix(trimmed, ".") {
 		return false
 	}
-	if _, err := url.Parse("http://" + trimmed); err != nil {
+
+	parsed, err := url.Parse("http://" + trimmed)
+	if err != nil {
 		return false
 	}
+
+	// 关键修复：避免把 index.php / style.css 这类相对资源名误判为裸域名。
+	host := strings.ToLower(parsed.Hostname())
+	if host != "" {
+		if idx := strings.LastIndex(host, "."); idx > 0 && idx < len(host)-1 {
+			if _, ok := commonFileExtensions[host[idx+1:]]; ok {
+				return false
+			}
+		}
+	}
+
 	return true
 }
 
@@ -172,6 +234,19 @@ func looksLikeHostWithPath(candidate string) bool {
 	if strings.HasPrefix(hostPart, ".") || strings.HasSuffix(hostPart, ".") {
 		return false
 	}
+
+	// 关键修复：避免把 foo.php/bar 这类“相对路径(带点)”误判成 host/path。
+	if parsed, err := url.Parse("http://" + hostPart); err == nil {
+		host := strings.ToLower(parsed.Hostname())
+		if host != "" {
+			if idx := strings.LastIndex(host, "."); idx > 0 && idx < len(host)-1 {
+				if _, ok := commonFileExtensions[host[idx+1:]]; ok {
+					return false
+				}
+			}
+		}
+	}
+
 	return true
 }
 

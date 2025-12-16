@@ -10,7 +10,7 @@ import (
 // StealthScript 反检测 JavaScript 脚本
 // 用于隐藏 headless 浏览器特征
 var StealthScript = `
-(function() {
+function() {
 	'use strict';
 
 	// 1. 隐藏 webdriver 标志
@@ -119,41 +119,56 @@ var StealthScript = `
 	}
 
 	// 9. 修复 permissions API
-	const originalQuery = navigator.permissions.query;
-	navigator.permissions.query = function(parameters) {
-		if (parameters.name === 'notifications') {
-			return Promise.resolve({ state: 'prompt', onchange: null });
+	try {
+		if (navigator.permissions && typeof navigator.permissions.query === 'function') {
+			const originalQuery = navigator.permissions.query.bind(navigator.permissions);
+			navigator.permissions.query = function(parameters) {
+				if (parameters && parameters.name === 'notifications') {
+					return Promise.resolve({ state: 'prompt', onchange: null });
+				}
+				return originalQuery(parameters);
+			};
 		}
-		return originalQuery.apply(this, arguments);
-	};
+	} catch(e) {}
 
 	// 10. 修复 WebGL vendor/renderer
-	const getParameter = WebGLRenderingContext.prototype.getParameter;
-	WebGLRenderingContext.prototype.getParameter = function(parameter) {
-		if (parameter === 37445) {
-			return 'Intel Inc.';
+	try {
+		if (window.WebGLRenderingContext && WebGLRenderingContext.prototype && WebGLRenderingContext.prototype.getParameter) {
+			const getParameter = WebGLRenderingContext.prototype.getParameter;
+			WebGLRenderingContext.prototype.getParameter = function(parameter) {
+				if (parameter === 37445) {
+					return 'Intel Inc.';
+				}
+				if (parameter === 37446) {
+					return 'Intel Iris OpenGL Engine';
+				}
+				return getParameter.apply(this, arguments);
+			};
 		}
-		if (parameter === 37446) {
-			return 'Intel Iris OpenGL Engine';
-		}
-		return getParameter.apply(this, arguments);
-	};
+	} catch(e) {}
 
 	// 11. 修复 canvas fingerprint
-	const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
-	HTMLCanvasElement.prototype.toDataURL = function(type) {
-		if (type === 'image/png' && this.width === 220 && this.height === 30) {
-			// 可能是指纹检测，返回略微修改的结果
-			return originalToDataURL.apply(this, arguments);
+	try {
+		if (window.HTMLCanvasElement && HTMLCanvasElement.prototype && HTMLCanvasElement.prototype.toDataURL) {
+			const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
+			HTMLCanvasElement.prototype.toDataURL = function(type) {
+				if (type === 'image/png' && this.width === 220 && this.height === 30) {
+					// 可能是指纹检测，返回略微修改的结果
+					return originalToDataURL.apply(this, arguments);
+				}
+				return originalToDataURL.apply(this, arguments);
+			};
 		}
-		return originalToDataURL.apply(this, arguments);
-	};
+	} catch(e) {}
 
 	// 12. 隐藏 headless 相关 user-agent 特征
-	Object.defineProperty(navigator, 'userAgent', {
-		get: () => navigator.userAgent.replace(/HeadlessChrome/g, 'Chrome'),
-		configurable: true
-	});
+	try {
+		const originalUA = navigator.userAgent || '';
+		Object.defineProperty(navigator, 'userAgent', {
+			get: () => String(originalUA).replace(/HeadlessChrome/g, 'Chrome'),
+			configurable: true
+		});
+	} catch(e) {}
 
 	// 13. 修复 connection 对象
 	Object.defineProperty(navigator, 'connection', {
@@ -174,7 +189,7 @@ var StealthScript = `
 	}
 
 	console.log('[Argo Stealth] Anti-detection scripts injected');
-})();
+}
 `
 
 // UserAgents 常见的真实 User-Agent 列表

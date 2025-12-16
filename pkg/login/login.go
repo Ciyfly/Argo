@@ -344,8 +344,12 @@ func (lp *LoginAutoData) fillCaptchaInput(page *rod.Page, code string) bool {
 			continue
 		}
 		if matchKeywords(input, captchaKeywords) || strings.Contains(attrLower(input, "placeholder"), "验证码") {
-			input.MustSelectAllText()
-			input.Input(code)
+			if err := input.SelectAllText(); err != nil {
+				log.Logger.Debugf("[captcha] SelectAllText 失败: %s", err)
+			}
+			if err := input.Input(code); err != nil {
+				log.Logger.Debugf("[captcha] 输入验证码失败: %s", err)
+			}
 			return true
 		}
 	}

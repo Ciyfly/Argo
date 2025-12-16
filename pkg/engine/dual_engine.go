@@ -258,6 +258,20 @@ func (de *DualEngine) GetStats() DualEngineStats {
 	}
 }
 
+func (de *DualEngine) StandardSnapshot() StandardEngineSnapshot {
+	if de == nil || de.standardEngine == nil {
+		return StandardEngineSnapshot{}
+	}
+	return de.standardEngine.Snapshot()
+}
+
+func (de *DualEngine) IsStandardIdle() bool {
+	if de == nil || de.standardEngine == nil {
+		return true
+	}
+	return de.standardEngine.IsIdle()
+}
+
 // RecordStandardSuccess 记录标准引擎成功
 func (de *DualEngine) RecordStandardSuccess() {
 	atomic.AddInt64(&de.stats.StandardSuccess, 1)
@@ -377,14 +391,14 @@ func DefaultURLClassifierConfig() *URLClassifierConfig {
 			`\.pdf(\?|$)`,
 		},
 		SPAPatterns: []string{
-			`#/`,      // Hash routing
-			`/_next/`, // Next.js
-			`/_nuxt/`, // Nuxt.js
-			`/static/js/main\.`,      // React build
-			`/static/js/[0-9]+\.`,    // React chunks
-			`/assets/index-`,         // Vite build
-			`/__webpack_hmr`,         // Webpack HMR
-			`/sockjs-node`,           // Dev server
+			`#/`,                    // Hash routing
+			`/_next/`,               // Next.js
+			`/_nuxt/`,               // Nuxt.js
+			`/static/js/main\.`,     // React build
+			`/static/js/[0-9]+\.`,   // React chunks
+			`/assets/index-`,        // Vite build
+			`/__webpack_hmr`,        // Webpack HMR
+			`/sockjs-node`,          // Dev server
 			`\.module\.[a-f0-9]+\.`, // CSS modules
 		},
 	}
@@ -564,9 +578,15 @@ type StandardEngine struct {
 	wg        sync.WaitGroup
 
 	// 统计
+	inflight  int64
 	processed int64
 	succeeded int64
 	failed    int64
+}
+
+type StandardEngineSnapshot struct {
+	QueueLen int   `json:"queue_len"`
+	InFlight int64 `json:"in_flight"`
 }
 
 // StandardEngineConfig 标准引擎配置
@@ -673,6 +693,21 @@ func (se *StandardEngine) Submit(uif *UrlInfo) {
 	}
 }
 
+func (se *StandardEngine) Snapshot() StandardEngineSnapshot {
+	if se == nil {
+		return StandardEngineSnapshot{}
+	}
+	return StandardEngineSnapshot{
+		QueueLen: len(se.workQueue),
+		InFlight: atomic.LoadInt64(&se.inflight),
+	}
+}
+
+func (se *StandardEngine) IsIdle() bool {
+	snap := se.Snapshot()
+	return snap.QueueLen == 0 && snap.InFlight == 0
+}
+
 // worker 工作协程
 func (se *StandardEngine) worker(id int) {
 	defer se.wg.Done()
@@ -685,7 +720,9 @@ func (se *StandardEngine) worker(id int) {
 			if uif == nil {
 				continue
 			}
+			atomic.AddInt64(&se.inflight, 1)
 			se.processURL(uif)
+			atomic.AddInt64(&se.inflight, -1)
 		}
 	}
 }
@@ -848,27 +885,49 @@ func (se *StandardEngine) needsHybridEngine(body, contentType string) bool {
 
 // extractURLs 从响应中提取 URL
 func (se *StandardEngine) extractURLs(uif *UrlInfo, body, contentType string) {
-	var urls []string
+	var discovered []static.DiscoveredURL
 
 	if strings.Contains(contentType, "text/html") {
-		// HTML 解析
-		urls = static.ParseHtml(body, uif.Url)
+		// HTML 解析（含内联脚本/文本/注释的 URL）
+		discovered = static.ParseHtmlWithSource(body, uif.Url)
+		// 表单提取（与浏览器静态解析保持一致）
+		for _, u := range static.ExtractFormURLs(body, uif.Url) {
+			if u == "" {
+				continue
+			}
+			discovered = append(discovered, static.DiscoveredURL{URL: u, SourceType: SourceTypeHTMLForm})
+		}
 	} else if strings.Contains(contentType, "application/json") {
 		// JSON 中提取 URL
-		urls = se.extractURLsFromJSON(body, uif.Url)
+		for _, u := range se.extractURLsFromJSON(body, uif.Url) {
+			if u == "" {
+				continue
+			}
+			discovered = append(discovered, static.DiscoveredURL{URL: u, SourceType: SourceTypeJSON})
+		}
 	} else if strings.Contains(contentType, "javascript") {
 		// JS 中提取 URL
-		urls = static.ParseJSWithJSluice(body, uif.Url)
+		for _, u := range static.ParseJSWithJSluice(body, uif.Url) {
+			if u == "" {
+				continue
+			}
+			discovered = append(discovered, static.DiscoveredURL{URL: u, SourceType: SourceTypeJSFile})
+		}
 	}
 
 	// 提交发现的 URL
-	for _, u := range urls {
+	for _, item := range discovered {
+		u := item.URL
 		if u == "" || u == uif.Url {
 			continue
 		}
+		sourceType := item.SourceType
+		if sourceType == "" {
+			sourceType = SourceTypeHTMLAttr
+		}
 		newUif := &UrlInfo{
 			Url:        u,
-			SourceType: "standard_engine",
+			SourceType: sourceType,
 			SourceUrl:  uif.Url,
 			Depth:      uif.Depth + 1,
 		}
@@ -913,6 +972,8 @@ func (se *StandardEngine) submitResult(uif *UrlInfo, resp *http.Response, body s
 		URL:             uif.Url,
 		Method:          "GET",
 		Host:            resp.Request.Host,
+		SourceType:      uif.SourceType,
+		SourceUrl:       uif.SourceUrl,
 		Headers:         reqHeaders,
 		Data:            "",
 		Status:          resp.StatusCode,
@@ -1097,11 +1158,11 @@ func (b *BrowserRateLimiter) GetCurrentInterval(domain string) time.Duration {
 
 // BrowserRateLimitStats 浏览器限速统计
 type BrowserRateLimitStats struct {
-	Enabled        bool   `json:"enabled"`
-	TotalWaits     int64  `json:"total_waits"`
-	TotalWaitMs    int64  `json:"total_wait_ms"`
-	ThrottledCount int64  `json:"throttled_count"`
-	AvgWaitMs      int64  `json:"avg_wait_ms"`
+	Enabled        bool  `json:"enabled"`
+	TotalWaits     int64 `json:"total_waits"`
+	TotalWaitMs    int64 `json:"total_wait_ms"`
+	ThrottledCount int64 `json:"throttled_count"`
+	AvgWaitMs      int64 `json:"avg_wait_ms"`
 }
 
 // Stats 获取统计信息

@@ -258,8 +258,13 @@ func (lp *LoginAutoData) tryLogin(stageRecorder func(string)) {
 		// se.MustClick()
 		// se.Click()
 		// pointer-events: none;
-		pointerEvent := se.MustEval("()=>window.getComputedStyle(this,null).getPropertyValue('pointer-events')")
-		if pointerEvent.String() == "none" {
+		pointerEvents := ""
+		if res, err := se.Eval("()=>window.getComputedStyle(this,null).getPropertyValue('pointer-events')"); err == nil && res != nil {
+			pointerEvents = res.Value.String()
+		} else if err != nil {
+			log.Logger.Debugf("[login] eval pointer-events 失败，继续尝试点击: %s", err)
+		}
+		if pointerEvents == "none" {
 			log.Logger.Debug("登录按钮存在 pointer-events 尝试点击子元素")
 			// 对子元素进行点击
 			children, err := se.Elements("")

@@ -14,12 +14,12 @@ import (
 
 // JSAnalyzer JavaScript静态分析器
 type JSAnalyzer struct {
-	mu              sync.RWMutex
-	patterns        []*URLPattern
-	extractedURLs   map[string]*ExtractedURL
-	apiEndpoints    map[string]*APIEndpoint
-	sensitiveData   map[string][]string
-	config          *JSAnalyzerConfig
+	mu            sync.RWMutex
+	patterns      []*URLPattern
+	extractedURLs map[string]*ExtractedURL
+	apiEndpoints  map[string]*APIEndpoint
+	sensitiveData map[string][]string
+	config        *JSAnalyzerConfig
 	// P0优化: JSluice AST 分析器
 	jsluiceAnalyzer *static.JSluiceAnalyzer
 }
@@ -129,16 +129,16 @@ var sensitivePatterns = map[string]*regexp.Regexp{
 	"github_legacy":        regexp.MustCompile(`(?i)github[_\-\.]?(?:access[_\-\.]?)?token['":\s]*[=:]["']?([0-9a-f]{40})["']?`),
 
 	// ==================== GitLab ====================
-	"gitlab_token":         regexp.MustCompile(`glpat-[0-9a-zA-Z\-_]{20}`),
-	"gitlab_pipeline":      regexp.MustCompile(`glptt-[0-9a-f]{40}`),
-	"gitlab_runner":        regexp.MustCompile(`GR1348941[0-9a-zA-Z\-_]{20}`),
-	"gitlab_feed_token":    regexp.MustCompile(`glft-[0-9a-zA-Z\-_]{20}`),
+	"gitlab_token":      regexp.MustCompile(`glpat-[0-9a-zA-Z\-_]{20}`),
+	"gitlab_pipeline":   regexp.MustCompile(`glptt-[0-9a-f]{40}`),
+	"gitlab_runner":     regexp.MustCompile(`GR1348941[0-9a-zA-Z\-_]{20}`),
+	"gitlab_feed_token": regexp.MustCompile(`glft-[0-9a-zA-Z\-_]{20}`),
 
 	// ==================== Slack ====================
-	"slack_token":       regexp.MustCompile(`xox[baprs]-[0-9]{10,13}-[0-9]{10,13}[a-zA-Z0-9-]*`),
-	"slack_webhook":     regexp.MustCompile(`https://hooks\.slack\.com/services/T[a-zA-Z0-9_]+/B[a-zA-Z0-9_]+/[a-zA-Z0-9_]+`),
-	"slack_bot_token":   regexp.MustCompile(`xoxb-[0-9]{11}-[0-9]{11}-[0-9a-zA-Z]{24}`),
-	"slack_user_token":  regexp.MustCompile(`xoxp-[0-9]{11}-[0-9]{11}-[0-9a-zA-Z]{24}`),
+	"slack_token":        regexp.MustCompile(`xox[baprs]-[0-9]{10,13}-[0-9]{10,13}[a-zA-Z0-9-]*`),
+	"slack_webhook":      regexp.MustCompile(`https://hooks\.slack\.com/services/T[a-zA-Z0-9_]+/B[a-zA-Z0-9_]+/[a-zA-Z0-9_]+`),
+	"slack_bot_token":    regexp.MustCompile(`xoxb-[0-9]{11}-[0-9]{11}-[0-9a-zA-Z]{24}`),
+	"slack_user_token":   regexp.MustCompile(`xoxp-[0-9]{11}-[0-9]{11}-[0-9a-zA-Z]{24}`),
 	"slack_config_token": regexp.MustCompile(`xoxe\.xox[bp]-[0-9]-[0-9a-zA-Z]{163}`),
 
 	// ==================== Stripe ====================
@@ -174,10 +174,10 @@ var sensitivePatterns = map[string]*regexp.Regexp{
 	"heroku_api_key": regexp.MustCompile(`(?i)heroku[_\-\.]?api[_\-\.]?key['":\s]*[=:]["']?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})["']?`),
 
 	// ==================== Azure ====================
-	"azure_subscription_key": regexp.MustCompile(`(?i)azure[_\-\.]?(?:subscription|api)[_\-\.]?key['":\s]*[=:]["']?([0-9a-f]{32})["']?`),
-	"azure_storage_key":      regexp.MustCompile(`(?i)(?:account[_\-\.]?key|storage[_\-\.]?key)['":\s]*[=:]["']?([A-Za-z0-9+/=]{80,92})["']?`),
+	"azure_subscription_key":  regexp.MustCompile(`(?i)azure[_\-\.]?(?:subscription|api)[_\-\.]?key['":\s]*[=:]["']?([0-9a-f]{32})["']?`),
+	"azure_storage_key":       regexp.MustCompile(`(?i)(?:account[_\-\.]?key|storage[_\-\.]?key)['":\s]*[=:]["']?([A-Za-z0-9+/=]{80,92})["']?`),
 	"azure_connection_string": regexp.MustCompile(`DefaultEndpointsProtocol=https;AccountName=[^;]+;AccountKey=[A-Za-z0-9+/=]{80,92}`),
-	"azure_sas_token":        regexp.MustCompile(`(?:sv|sig)=[0-9a-zA-Z%]+`),
+	"azure_sas_token":         regexp.MustCompile(`(?:sv|sig)=[0-9a-zA-Z%]+`),
 
 	// ==================== Alibaba Cloud ====================
 	"aliyun_access_key": regexp.MustCompile(`LTAI[0-9a-zA-Z]{12,20}`),
@@ -203,13 +203,13 @@ var sensitivePatterns = map[string]*regexp.Regexp{
 	"shopify_private_token": regexp.MustCompile(`shppa_[0-9a-f]{32}`),
 
 	// ==================== Dropbox ====================
-	"dropbox_access_token":   regexp.MustCompile(`sl\.[0-9A-Za-z\-_]{130,}`),
-	"dropbox_short_token":    regexp.MustCompile(`(?i)dropbox[_\-\.]?(?:access[_\-\.]?)?token['":\s]*[=:]["']?([a-zA-Z0-9_-]{64})["']?`),
+	"dropbox_access_token": regexp.MustCompile(`sl\.[0-9A-Za-z\-_]{130,}`),
+	"dropbox_short_token":  regexp.MustCompile(`(?i)dropbox[_\-\.]?(?:access[_\-\.]?)?token['":\s]*[=:]["']?([a-zA-Z0-9_-]{64})["']?`),
 
 	// ==================== Discord ====================
-	"discord_token":         regexp.MustCompile(`[MN][A-Za-z\d]{23,}\.[\w-]{6}\.[\w-]{27}`),
-	"discord_webhook":       regexp.MustCompile(`https://discord(?:app)?\.com/api/webhooks/[0-9]+/[A-Za-z0-9_\-]+`),
-	"discord_bot_token":     regexp.MustCompile(`(?i)discord[_\-\.]?(?:bot[_\-\.]?)?token['":\s]*[=:]["']?([A-Za-z0-9_\-.]{59,68})["']?`),
+	"discord_token":     regexp.MustCompile(`[MN][A-Za-z\d]{23,}\.[\w-]{6}\.[\w-]{27}`),
+	"discord_webhook":   regexp.MustCompile(`https://discord(?:app)?\.com/api/webhooks/[0-9]+/[A-Za-z0-9_\-]+`),
+	"discord_bot_token": regexp.MustCompile(`(?i)discord[_\-\.]?(?:bot[_\-\.]?)?token['":\s]*[=:]["']?([A-Za-z0-9_\-.]{59,68})["']?`),
 
 	// ==================== Telegram ====================
 	"telegram_bot_token": regexp.MustCompile(`[0-9]{9,10}:[0-9A-Za-z_-]{35}`),
@@ -227,9 +227,9 @@ var sensitivePatterns = map[string]*regexp.Regexp{
 	"linkedin_client_secret": regexp.MustCompile(`(?i)linkedin[_\-\.]?client[_\-\.]?secret['":\s]*[=:]["']?([0-9a-zA-Z]{16})["']?`),
 
 	// ==================== 通用认证 ====================
-	"jwt_token":           regexp.MustCompile(`eyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*`),
-	"bearer_token":        regexp.MustCompile(`(?i)bearer\s+[a-zA-Z0-9_\-\.=]{20,500}`),
-	"basic_auth":          regexp.MustCompile(`(?i)basic\s+[a-zA-Z0-9+/=]{20,100}`),
+	"jwt_token":            regexp.MustCompile(`eyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*`),
+	"bearer_token":         regexp.MustCompile(`(?i)bearer\s+[a-zA-Z0-9_\-\.=]{20,500}`),
+	"basic_auth":           regexp.MustCompile(`(?i)basic\s+[a-zA-Z0-9+/=]{20,100}`),
 	"authorization_header": regexp.MustCompile(`(?i)authorization['":\s]*[=:]["']?(?:bearer|basic|token)\s+([a-zA-Z0-9_\-\.=+/]{20,})["']?`),
 
 	// ==================== 私钥/证书 ====================
@@ -242,13 +242,13 @@ var sensitivePatterns = map[string]*regexp.Regexp{
 	"ssh_key":             regexp.MustCompile(`ssh-(?:rsa|dss|ed25519|ecdsa)\s+[A-Za-z0-9+/=]{100,}`),
 
 	// ==================== 数据库 ====================
-	"mysql_connection":      regexp.MustCompile(`mysql://[^\s'"<>]+:[^\s'"<>]+@[^\s'"<>]+`),
-	"postgres_connection":   regexp.MustCompile(`postgres(?:ql)?://[^\s'"<>]+:[^\s'"<>]+@[^\s'"<>]+`),
-	"mongodb_connection":    regexp.MustCompile(`mongodb(?:\+srv)?://[^\s'"<>]+:[^\s'"<>]+@[^\s'"<>]+`),
-	"redis_connection":      regexp.MustCompile(`redis://[^\s'"<>]+:[^\s'"<>]+@[^\s'"<>]+`),
-	"elasticsearch_url":     regexp.MustCompile(`(?i)elasticsearch[_\-\.]?(?:url|uri)['":\s]*[=:]["']?(https?://[^\s'"]+)["']?`),
-	"jdbc_connection":       regexp.MustCompile(`jdbc:[a-z]+://[^\s'"]+`),
-	"db_password":           regexp.MustCompile(`(?i)(?:db|database)[_\-\.]?pass(?:word)?['":\s]*[=:]["']?([^\s'"]{6,})["']?`),
+	"mysql_connection":    regexp.MustCompile(`mysql://[^\s'"<>]+:[^\s'"<>]+@[^\s'"<>]+`),
+	"postgres_connection": regexp.MustCompile(`postgres(?:ql)?://[^\s'"<>]+:[^\s'"<>]+@[^\s'"<>]+`),
+	"mongodb_connection":  regexp.MustCompile(`mongodb(?:\+srv)?://[^\s'"<>]+:[^\s'"<>]+@[^\s'"<>]+`),
+	"redis_connection":    regexp.MustCompile(`redis://[^\s'"<>]+:[^\s'"<>]+@[^\s'"<>]+`),
+	"elasticsearch_url":   regexp.MustCompile(`(?i)elasticsearch[_\-\.]?(?:url|uri)['":\s]*[=:]["']?(https?://[^\s'"]+)["']?`),
+	"jdbc_connection":     regexp.MustCompile(`jdbc:[a-z]+://[^\s'"]+`),
+	"db_password":         regexp.MustCompile(`(?i)(?:db|database)[_\-\.]?pass(?:word)?['":\s]*[=:]["']?([^\s'"]{6,})["']?`),
 
 	// ==================== 通用密码/密钥 ====================
 	"password_field":       regexp.MustCompile(`(?i)(?:password|passwd|pwd|pass)['":\s]*[=:]["']?([^\s'"]{6,50})["']?`),
@@ -262,9 +262,9 @@ var sensitivePatterns = map[string]*regexp.Regexp{
 	"auth_token":           regexp.MustCompile(`(?i)auth[_\-\.]?token['":\s]*[=:]["']?([^\s'"]{20,500})["']?`),
 
 	// ==================== 高熵值字符串（可能是密钥）====================
-	"hex_secret_32":        regexp.MustCompile(`(?i)(?:key|secret|token|password|credential)['":\s]*[=:]["']?([0-9a-f]{32})["']?`),
-	"hex_secret_64":        regexp.MustCompile(`(?i)(?:key|secret|token|password|credential)['":\s]*[=:]["']?([0-9a-f]{64})["']?`),
-	"base64_secret":        regexp.MustCompile(`(?i)(?:key|secret|token|credential)['":\s]*[=:]["']?([A-Za-z0-9+/]{40,}={0,2})["']?`),
+	"hex_secret_32": regexp.MustCompile(`(?i)(?:key|secret|token|password|credential)['":\s]*[=:]["']?([0-9a-f]{32})["']?`),
+	"hex_secret_64": regexp.MustCompile(`(?i)(?:key|secret|token|password|credential)['":\s]*[=:]["']?([0-9a-f]{64})["']?`),
+	"base64_secret": regexp.MustCompile(`(?i)(?:key|secret|token|credential)['":\s]*[=:]["']?([A-Za-z0-9+/]{40,}={0,2})["']?`),
 
 	// ==================== OAuth ====================
 	"oauth_client_id":     regexp.MustCompile(`(?i)(?:oauth[_\-\.]?)?client[_\-\.]?id['":\s]*[=:]["']?([0-9a-zA-Z\-_]{20,100})["']?`),
@@ -276,7 +276,7 @@ var sensitivePatterns = map[string]*regexp.Regexp{
 	"cloudflare_api_key": regexp.MustCompile(`(?i)cloudflare[_\-\.]?api[_\-\.]?key['":\s]*[=:]["']?([0-9a-f]{37})["']?`),
 
 	// ==================== 加密货币 ====================
-	"bitcoin_private_key": regexp.MustCompile(`[5KL][1-9A-HJ-NP-Za-km-z]{50,51}`),
+	"bitcoin_private_key":  regexp.MustCompile(`[5KL][1-9A-HJ-NP-Za-km-z]{50,51}`),
 	"ethereum_private_key": regexp.MustCompile(`(?i)(?:eth|ethereum)[_\-\.]?(?:private[_\-\.]?)?key['":\s]*[=:]["']?(0x[0-9a-fA-F]{64})["']?`),
 
 	// ==================== Sentry ====================
@@ -308,10 +308,10 @@ var sensitivePatterns = map[string]*regexp.Regexp{
 	"zendesk_api_token": regexp.MustCompile(`(?i)zendesk[_\-\.]?api[_\-\.]?token['":\s]*[=:]["']?([a-zA-Z0-9]{40})["']?`),
 
 	// ==================== 敏感URL ====================
-	"internal_ip":      regexp.MustCompile(`(?:https?://)?(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})(?::\d+)?`),
-	"localhost_url":    regexp.MustCompile(`(?:https?://)?(?:localhost|127\.0\.0\.1)(?::\d+)?(?:/[^\s'"]*)?`),
-	"admin_panel_url":  regexp.MustCompile(`(?i)(?:https?://)?[^\s'"]+/(?:admin|administrator|manager|backend|console|dashboard)(?:/[^\s'"]*)?`),
-	"debug_endpoint":   regexp.MustCompile(`(?i)(?:https?://)?[^\s'"]+/(?:debug|phpinfo|server-status|\.env|\.git|\.svn|\.htaccess)(?:/[^\s'"]*)?`),
+	"internal_ip":     regexp.MustCompile(`(?:https?://)?(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})(?::\d+)?`),
+	"localhost_url":   regexp.MustCompile(`(?:https?://)?(?:localhost|127\.0\.0\.1)(?::\d+)?(?:/[^\s'"]*)?`),
+	"admin_panel_url": regexp.MustCompile(`(?i)(?:https?://)?[^\s'"]+/(?:admin|administrator|manager|backend|console|dashboard)(?:/[^\s'"]*)?`),
+	"debug_endpoint":  regexp.MustCompile(`(?i)(?:https?://)?[^\s'"]+/(?:debug|phpinfo|server-status|\.env|\.git|\.svn|\.htaccess)(?:/[^\s'"]*)?`),
 }
 
 // DefaultJSAnalyzerConfig 默认配置
@@ -319,8 +319,8 @@ func DefaultJSAnalyzerConfig() *JSAnalyzerConfig {
 	return &JSAnalyzerConfig{
 		EnableAPIExtraction:    true,
 		EnableSecretDetection:  true,
-		EnableSourceMapParsing: false, // 默认关闭，可能增加请求
-		EnableJSluice:          true,  // P0优化: 默认启用JSluice
+		EnableSourceMapParsing: false,           // 默认关闭，可能增加请求
+		EnableJSluice:          true,            // P0优化: 默认启用JSluice
 		MaxScriptSize:          5 * 1024 * 1024, // 5MB
 	}
 }
@@ -569,7 +569,7 @@ func (ja *JSAnalyzer) detectSecretsWithRegex(script string, result *JSAnalysisRe
 // extractInlineScripts 提取内联脚本
 func (ja *JSAnalyzer) extractInlineScripts(page *rod.Page) ([]string, error) {
 	result, err := page.Eval(`
-		(function() {
+		() => {
 			const scripts = [];
 			document.querySelectorAll('script:not([src])').forEach(s => {
 				if (s.textContent && s.textContent.length > 0) {
@@ -577,7 +577,7 @@ func (ja *JSAnalyzer) extractInlineScripts(page *rod.Page) ([]string, error) {
 				}
 			});
 			return scripts;
-		})()
+		}
 	`)
 	if err != nil {
 		return nil, err
@@ -596,13 +596,13 @@ func (ja *JSAnalyzer) extractInlineScripts(page *rod.Page) ([]string, error) {
 // extractExternalScriptURLs 提取外部脚本URL
 func (ja *JSAnalyzer) extractExternalScriptURLs(page *rod.Page) ([]string, error) {
 	result, err := page.Eval(`
-		(function() {
+		() => {
 			const urls = [];
 			document.querySelectorAll('script[src]').forEach(s => {
 				if (s.src) urls.push(s.src);
 			});
 			return urls;
-		})()
+		}
 	`)
 	if err != nil {
 		return nil, err
@@ -621,7 +621,7 @@ func (ja *JSAnalyzer) extractExternalScriptURLs(page *rod.Page) ([]string, error
 // extractJSONConfigs 提取JSON配置
 func (ja *JSAnalyzer) extractJSONConfigs(page *rod.Page) ([]string, error) {
 	result, err := page.Eval(`
-		(function() {
+		() => {
 			const configs = [];
 			// type="application/json" 脚本
 			document.querySelectorAll('script[type="application/json"]').forEach(s => {
@@ -639,7 +639,7 @@ func (ja *JSAnalyzer) extractJSONConfigs(page *rod.Page) ([]string, error) {
 				});
 			});
 			return configs;
-		})()
+		}
 	`)
 	if err != nil {
 		return nil, err
@@ -658,7 +658,7 @@ func (ja *JSAnalyzer) extractJSONConfigs(page *rod.Page) ([]string, error) {
 // extractGlobalConfigs 提取全局变量配置
 func (ja *JSAnalyzer) extractGlobalConfigs(page *rod.Page) ([]string, error) {
 	result, err := page.Eval(`
-		(function() {
+		() => {
 			const configs = [];
 			const commonNames = [
 				'__INITIAL_STATE__', '__NEXT_DATA__', '__NUXT__',
@@ -682,7 +682,7 @@ func (ja *JSAnalyzer) extractGlobalConfigs(page *rod.Page) ([]string, error) {
 				} catch(e) {}
 			}
 			return configs;
-		})()
+		}
 	`)
 	if err != nil {
 		return nil, err
@@ -942,7 +942,7 @@ func (ja *JSAnalyzer) AnalyzeScriptContent(content, source string) *JSAnalysisRe
 // ExtractRoutes 从前端路由配置中提取路由
 func (ja *JSAnalyzer) ExtractRoutes(page *rod.Page) ([]string, error) {
 	result, err := page.Eval(`
-		(function() {
+		() => {
 			const routes = new Set();
 
 			// Vue Router
@@ -983,7 +983,7 @@ func (ja *JSAnalyzer) ExtractRoutes(page *rod.Page) ([]string, error) {
 			});
 
 			return [...routes];
-		})()
+		}
 	`)
 
 	if err != nil {

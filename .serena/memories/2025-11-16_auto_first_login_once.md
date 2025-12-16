@@ -1,0 +1,1 @@
+2025-11-16：重构交互顺序：runInteractions 现在固定按 auto→login→playback 执行，移除了基于 DOM 的登录优先判断。登录逻辑改成 EngineInfo.loginOnce 控制全局只尝试一次（并缓存结果），后续页面不会重复注入登录脚本，StageRecorder 会显示 skipped。

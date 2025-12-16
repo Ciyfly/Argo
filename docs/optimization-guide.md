@@ -1649,7 +1649,7 @@ passive_sources:
 scope:
   include_subdomains: true  # 包含子域名
   exclude_cdn: true         # 排除CDN域名
-  exclude_external: false   # 排除外部链接
+  exclude_external: true    # 排除外部链接
   max_depth: 10             # 最大爬取深度
   # include_domains: []     # 域名白名单
   # exclude_domains: []     # 域名黑名单

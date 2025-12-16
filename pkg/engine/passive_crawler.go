@@ -16,14 +16,14 @@ import (
 // PassiveCrawler 被动爬取模式
 // 通过监听网络请求和页面事件来收集URL，减少主动请求
 type PassiveCrawler struct {
-	mu              sync.RWMutex
-	engine          *EngineInfo
-	discoveredURLs  map[string]bool
-	pendingURLs     chan *DiscoveredURL
-	eventListeners  []func(event *CrawlEvent)
+	mu             sync.RWMutex
+	engine         *EngineInfo
+	discoveredURLs map[string]bool
+	pendingURLs    chan *DiscoveredURL
+	eventListeners []func(event *CrawlEvent)
 
 	// 配置
-	config          *PassiveCrawlerConfig
+	config *PassiveCrawlerConfig
 
 	// 统计
 	urlsDiscovered  int64
@@ -31,26 +31,26 @@ type PassiveCrawler struct {
 	eventsProcessed int64
 
 	// 控制
-	running         int32
-	stopCh          chan struct{}
+	running int32
+	stopCh  chan struct{}
 }
 
 // PassiveCrawlerConfig 被动爬取配置
 type PassiveCrawlerConfig struct {
-	EnableNetworkMonitor   bool          // 启用网络监控
-	EnableDOMObserver      bool          // 启用DOM变化观察
-	EnableEventCapture     bool          // 启用事件捕获
-	MaxPendingURLs         int           // 最大待处理URL数
-	ProcessInterval        time.Duration // 处理间隔
-	URLPatterns            []string      // URL匹配模式
-	ExcludePatterns        []string      // 排除模式
+	EnableNetworkMonitor bool          // 启用网络监控
+	EnableDOMObserver    bool          // 启用DOM变化观察
+	EnableEventCapture   bool          // 启用事件捕获
+	MaxPendingURLs       int           // 最大待处理URL数
+	ProcessInterval      time.Duration // 处理间隔
+	URLPatterns          []string      // URL匹配模式
+	ExcludePatterns      []string      // 排除模式
 }
 
 // DiscoveredURL 发现的URL
 type DiscoveredURL struct {
 	URL        string
-	Source     string    // 来源: network, dom, event, script
-	Method     string    // HTTP方法
+	Source     string // 来源: network, dom, event, script
+	Method     string // HTTP方法
 	Headers    map[string]string
 	RefererURL string
 	Timestamp  time.Time
@@ -59,7 +59,7 @@ type DiscoveredURL struct {
 
 // CrawlEvent 爬取事件
 type CrawlEvent struct {
-	Type      string      // url_discovered, request_caught, dom_changed
+	Type      string // url_discovered, request_caught, dom_changed
 	URL       string
 	Data      interface{}
 	Timestamp time.Time
@@ -231,7 +231,7 @@ func (pc *PassiveCrawler) handleNetworkResponse(e *proto.NetworkResponseReceived
 func (pc *PassiveCrawler) observeDOM(page *rod.Page) {
 	// 注入 MutationObserver
 	script := `
-	(function() {
+	() => {
 		if (window.__argoObserver) return;
 
 		const discovered = new Set();
@@ -293,7 +293,7 @@ func (pc *PassiveCrawler) observeDOM(page *rod.Page) {
 		});
 
 		window.__argoObserver = observer;
-	})();
+	}
 	`
 
 	page.Eval(script)
@@ -317,11 +317,11 @@ func (pc *PassiveCrawler) observeDOM(page *rod.Page) {
 // collectDOMURLs 收集DOM中发现的URL
 func (pc *PassiveCrawler) collectDOMURLs(page *rod.Page) {
 	result, err := page.Eval(`
-		(function() {
+		() => {
 			const urls = window.__argoDiscoveredURLs || [];
 			window.__argoDiscoveredURLs = [];
 			return urls;
-		})()
+		}
 	`)
 
 	if err != nil {
@@ -349,7 +349,7 @@ func (pc *PassiveCrawler) collectDOMURLs(page *rod.Page) {
 func (pc *PassiveCrawler) captureEvents(page *rod.Page) {
 	// 注入事件监听器
 	script := `
-	(function() {
+	() => {
 		if (window.__argoEventCapture) return;
 
 		window.__argoEventURLs = [];
@@ -423,7 +423,7 @@ func (pc *PassiveCrawler) captureEvents(page *rod.Page) {
 		};
 
 		window.__argoEventCapture = true;
-	})();
+	}
 	`
 
 	page.Eval(script)
@@ -447,11 +447,11 @@ func (pc *PassiveCrawler) captureEvents(page *rod.Page) {
 // collectEventURLs 收集事件中发现的URL
 func (pc *PassiveCrawler) collectEventURLs(page *rod.Page) {
 	result, err := page.Eval(`
-		(function() {
+		() => {
 			const urls = window.__argoEventURLs || [];
 			window.__argoEventURLs = [];
 			return urls;
-		})()
+		}
 	`)
 
 	if err != nil {
@@ -653,7 +653,7 @@ func ExtractScriptURLs(page *rod.Page) []string {
 	var urls []string
 
 	result, err := page.Eval(`
-		(function() {
+		() => {
 			const urls = [];
 
 			// 提取内联脚本中的URL
@@ -690,7 +690,7 @@ func ExtractScriptURLs(page *rod.Page) []string {
 			});
 
 			return [...new Set(urls)];
-		})()
+		}
 	`)
 
 	if err != nil {
@@ -712,7 +712,7 @@ func ExtractAPIEndpoints(page *rod.Page) []string {
 	var endpoints []string
 
 	result, err := page.Eval(`
-		(function() {
+		() => {
 			const endpoints = new Set();
 
 			// 从脚本中提取
@@ -744,7 +744,7 @@ func ExtractAPIEndpoints(page *rod.Page) []string {
 			});
 
 			return [...endpoints];
-		})()
+		}
 	`)
 
 	if err != nil {

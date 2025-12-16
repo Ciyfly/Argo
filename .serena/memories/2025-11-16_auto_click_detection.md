@@ -1,0 +1,1 @@
+2025-11-16：增强自动交互可点击判断。AutoJsTemplate 现在通过 hasPointerCursor / data-* 属性识别 span/div 上的 Vue/React 绑定按钮（检测 cursor:pointer、role/button、data-click/data-action/@click 等），以便在 SPA 中触发更多路由按钮。

@@ -255,7 +255,7 @@ const adaptiveDelay = {
 		delay = Math.max(delay, this.minDelay);
 		delay = Math.min(delay, this.maxDelay);
 
-		// 添加随机抖动 ±10%
+		// 添加随机抖动 ±10%%
 		const jitter = delay * 0.1;
 		delay += Math.random() * jitter * 2 - jitter;
 
@@ -1309,7 +1309,7 @@ const clickNodeWithPopupCheck = async (node, reason) => {
 	await sleep(delay);
 
 	// 定期输出自适应延迟统计
-	if (state.actions % 10 === 0) {
+	if (state.actions %% 10 === 0) {
 		bridge.emit("adaptive_delay_stats", adaptiveDelay.stats());
 	}
 

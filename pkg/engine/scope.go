@@ -39,7 +39,7 @@ func DefaultScopeConfig() *ScopeConfig {
 		IncludeSubdomains: true,
 		ExcludeCDN:        true,
 		ExcludePrivateIP:  false,
-		ExcludeExternal:   false,
+		ExcludeExternal:   true,
 		MaxDepth:          10,
 		ExcludeExtensions: []string{
 			".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp", ".bmp",
@@ -60,13 +60,13 @@ func DefaultScopeConfig() *ScopeConfig {
 
 // ScopeController 作用域控制器
 type ScopeController struct {
-	config          *ScopeConfig
-	targetDomain    string
-	includeRegexes  []*regexp.Regexp
-	excludeRegexes  []*regexp.Regexp
-	cdnDomains      map[string]bool
-	mu              sync.RWMutex
-	stats           ScopeStats
+	config         *ScopeConfig
+	targetDomain   string
+	includeRegexes []*regexp.Regexp
+	excludeRegexes []*regexp.Regexp
+	cdnDomains     map[string]bool
+	mu             sync.RWMutex
+	stats          ScopeStats
 }
 
 // ScopeStats 作用域统计

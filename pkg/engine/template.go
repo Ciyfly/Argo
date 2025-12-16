@@ -51,6 +51,8 @@ var ResultHtmlTemplate = `
           <tr>
 			<th>Method</th>
             <th>URL</th>
+            <th>SourceType</th>
+            <th>SourceUrl</th>
             <th>Data</th>
             <th>Status</th>
           </tr>
@@ -60,6 +62,8 @@ var ResultHtmlTemplate = `
 		<tr>
 		<th>{{.Method}}</th>
 		<th>{{.URL}}</th>
+		<th>{{.SourceType}}</th>
+		<th>{{.SourceUrl}}</th>
 		<th>{{.Data}}</th>
 		<th>{{.Status}}</th>
 		</tr>

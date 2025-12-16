@@ -59,12 +59,17 @@ type metricsMiddleware struct{}
 func (s *staticParseMiddleware) Name() string { return "static" }
 
 func (s *staticParseMiddleware) Handle(ctx *PageContext) error {
-	staticUrls := static.ParseDom(ctx.Page)
-	if staticUrls != nil {
-		for _, staticUrl := range staticUrls {
-			ctx.Engine.PushStaticUrl(&UrlInfo{Url: staticUrl, SourceType: "static parse", SourceUrl: ctx.Url.Url, Depth: ctx.Url.Depth + 1})
-			ctx.Engine.EnrichStaticResource(staticUrl, ctx.Url.Depth+1)
+	discovered := static.ParseDomWithSource(ctx.Page)
+	for _, item := range discovered {
+		if item.URL == "" {
+			continue
 		}
+		sourceType := item.SourceType
+		if sourceType == "" {
+			sourceType = SourceTypeHTMLAttr
+		}
+		ctx.Engine.PushStaticUrl(&UrlInfo{Url: item.URL, SourceType: sourceType, SourceUrl: ctx.Url.Url, Depth: ctx.Url.Depth + 1})
+		ctx.Engine.EnrichStaticResource(item.URL, ctx.Url.Depth+1)
 	}
 	return nil
 }
@@ -78,9 +83,16 @@ func (i *interactionMiddleware) Handle(ctx *PageContext) error {
 	if ctx.StageRecorder != nil {
 		ctx.StageRecorder("interaction_chain:start")
 	}
-	urls := ctx.Engine.runInteractions(ctx.Page, ctx.Url, ctx.PageFlag == HOME_PAGE_FLAG, ctx.StageRecorder, ctx.ExtendTimeout)
-	for _, u := range urls {
-		ctx.Engine.PushStaticUrl(&UrlInfo{Url: u, SourceType: "interaction", SourceUrl: ctx.Url.Url, Depth: ctx.Url.Depth + 1})
+	discovered := ctx.Engine.runInteractions(ctx.Page, ctx.Url, ctx.PageFlag == HOME_PAGE_FLAG, ctx.StageRecorder, ctx.ExtendTimeout)
+	for _, item := range discovered {
+		if item.URL == "" {
+			continue
+		}
+		sourceType := item.SourceType
+		if sourceType == "" {
+			sourceType = SourceTypeInteractionAuto
+		}
+		ctx.Engine.PushStaticUrl(&UrlInfo{Url: item.URL, SourceType: sourceType, SourceUrl: ctx.Url.Url, Depth: ctx.Url.Depth + 1})
 	}
 	if ctx.StageRecorder != nil {
 		ctx.StageRecorder("interaction_chain:done")

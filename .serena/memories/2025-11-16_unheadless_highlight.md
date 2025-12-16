@@ -1,0 +1,1 @@
+2025-11-16：在 pkg/inject/auto.go 增加 unheadless 模式下的点击高亮，AutoJsTemplate 根据 browser.UnHeadless 插入 highlightEnabled 标志，clickNode 会在 DOM 元素上绘制红色边框并淡出。README 的 --unheadless 参数说明同步更新。

@@ -27,9 +27,10 @@ type ResultSink interface {
 
 func (ei *EngineInfo) InitResultHandler() {
 	ei.ResultList = make([]*PendingUrl, 0)
-	ei.ResultQueue = make(chan *PendingUrl)
+	ei.ResultQueue = make(chan *PendingUrl, 1024)
 	ei.ResultSinks = make(map[string]ResultSink)
 	ei.registerDefaultSinks()
+	ei.resultWg.Add(1)
 	go ei.resultHandlerWork()
 }
 
@@ -57,15 +58,35 @@ func (ei *EngineInfo) pushResult(pu *PendingUrl) {
 }
 
 func (ei *EngineInfo) resultHandlerWork() {
+	defer ei.resultWg.Done()
 	for data := range ei.ResultQueue {
 		if conf.GlobalConfig.Quiet {
 			jsonData, _ := json.Marshal(data)
 			fmt.Println(string(jsonData))
 		} else {
 			ei.ResultList = append(ei.ResultList, data)
-			log.Logger.Infof("[%s] %s", data.Method, data.URL)
+			from := ""
+			if data.SourceType != "" {
+				from = fmt.Sprintf("[%s]", data.SourceType)
+			}
+			if data.SourceUrl != "" {
+				log.Logger.Infof("[%s]%s %s <- %s", data.Method, from, data.URL, data.SourceUrl)
+			} else {
+				log.Logger.Infof("[%s]%s %s", data.Method, from, data.URL)
+			}
 		}
 	}
+}
+
+func (ei *EngineInfo) closeResultQueue() {
+	if ei == nil {
+		return
+	}
+	ei.resultCloseOnce.Do(func() {
+		if ei.ResultQueue != nil {
+			close(ei.ResultQueue)
+		}
+	})
 }
 
 func (ei *EngineInfo) writeResult(name string, data []byte) {
@@ -84,12 +105,13 @@ func (ei *EngineInfo) writeResult(name string, data []byte) {
 }
 
 func (ei *EngineInfo) SaveResult() {
+	// 先关闭结果管道并等待消费完成，确保 ResultList 已完全汇总后再落盘。
+	ei.closeResultQueue()
+	ei.resultWg.Wait()
+
 	log.Logger.Infof("[tab  count] %d", ei.TabCount)
 	if len(ei.ResultList) < 2 {
 		log.Logger.Errorf("No content crawled, you can contact the developer to recar target: %s", ei.HostName)
-		if ei.ResultQueue != nil {
-			close(ei.ResultQueue)
-		}
 		ei.logMetrics()
 		return
 	}
@@ -139,9 +161,6 @@ func (ei *EngineInfo) SaveResult() {
 	}
 	if conf.GlobalConfig.SeedOutput != "" {
 		writeSeeds(conf.GlobalConfig.SeedOutput, ei.ResultList)
-	}
-	if ei.ResultQueue != nil {
-		close(ei.ResultQueue)
 	}
 	ei.logMetrics()
 }

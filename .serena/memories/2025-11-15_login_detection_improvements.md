@@ -1,0 +1,1 @@
+2025-11-15：登录交互增强：1) 识别验证码后不再直接跳过，而是在 CLI 中打印 ASCII 预览、提示人工输入验证码并回填到页面；仍保存截图于 logs/captcha，并预留滑块 captcha TODO（stage=interaction:login:captcha_slider）。2) 维持 DOM 检测/控件匹配改进，字段缺失时给出阶段提示。3) README 说明 CLI ASCII + 截图流程。go test ./... 通过。

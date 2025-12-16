@@ -1,0 +1,1 @@
+2025-11-15（更新）：登录交互默认超时维持 5s，但按需求保留 WARN 日志。loginInteraction.Execute 在超时时重新使用 log.Logger.Warnf；已 gofmt + go test ./... 通过。

@@ -27,8 +27,9 @@ var metricsRegistry = struct {
 }{data: make(map[string]engine.MetricsSummary)}
 
 func SetupCloseHandler() {
-	c := make(chan os.Signal)
-	signal.Notify(c, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, os.Interrupt, os.Kill, syscall.SIGKILL)
+	c := make(chan os.Signal, 1)
+	// os.Kill / SIGKILL 无法被捕获，传入 signal.Notify 没有意义。
+	signal.Notify(c, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, os.Interrupt)
 	go func() {
 		<-c
 		fmt.Println("ctrl+c exit")

@@ -1,0 +1,1 @@
+2025-11-16：更新 runInteractions 的顺序策略：若 conf.GlobalConfig.PlaybackPath 不为空，则互动执行顺序为 playback→auto→login，否则保持 auto→login→playback。仍保留 loginOnce 只尝试一次登录。

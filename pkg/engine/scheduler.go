@@ -19,6 +19,8 @@ type Scheduler struct {
 	tabLimit chan struct{}
 	tabWg    sync.WaitGroup
 
+	activeTabs int64
+
 	maxQueueSize int
 	pq           priorityQueue
 	pqMutex      sync.Mutex
@@ -27,6 +29,13 @@ type Scheduler struct {
 
 	rateLimiter <-chan time.Time
 	ticker      *time.Ticker
+}
+
+type SchedulerSnapshot struct {
+	SubmitQueueLen   int   `json:"submit_queue_len"`
+	PriorityQueueLen int   `json:"priority_queue_len"`
+	TabQueueLen      int   `json:"tab_queue_len"`
+	ActiveTabs       int64 `json:"active_tabs"`
 }
 
 func NewScheduler(engine *EngineInfo) *Scheduler {
@@ -83,6 +92,26 @@ func (s *Scheduler) WaitQueueEmpty() {
 
 func (s *Scheduler) WaitTabs() {
 	s.tabWg.Wait()
+}
+
+func (s *Scheduler) Snapshot() SchedulerSnapshot {
+	if s == nil {
+		return SchedulerSnapshot{}
+	}
+	s.pqMutex.Lock()
+	pqLen := s.pq.Len()
+	s.pqMutex.Unlock()
+	return SchedulerSnapshot{
+		SubmitQueueLen:   len(s.submitCh),
+		PriorityQueueLen: pqLen,
+		TabQueueLen:      len(s.tabQueue),
+		ActiveTabs:       atomic.LoadInt64(&s.activeTabs),
+	}
+}
+
+func (s *Scheduler) IsIdle() bool {
+	snap := s.Snapshot()
+	return snap.SubmitQueueLen == 0 && snap.PriorityQueueLen == 0 && snap.TabQueueLen == 0 && snap.ActiveTabs == 0
 }
 
 func (s *Scheduler) ingestLoop() {
@@ -185,8 +214,10 @@ func (s *Scheduler) tabWork() {
 				continue
 			}
 			s.tabWg.Add(1)
+			atomic.AddInt64(&s.activeTabs, 1)
 			go func(info *UrlInfo) {
 				defer func() {
+					atomic.AddInt64(&s.activeTabs, -1)
 					<-s.tabLimit
 					s.tabWg.Done()
 					s.engine.EmitEvent(EngineEvent{Type: "tab_finish", Target: info.Url, Timestamp: time.Now()})

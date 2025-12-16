@@ -9,6 +9,7 @@ import (
 	"argo/pkg/utils"
 	"argo/pkg/vector"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -121,6 +122,12 @@ type EngineInfo struct {
 
 	loginOnce    sync.Once
 	loginOnceErr error
+
+	bgTasks  int64
+	stopping int32
+
+	resultWg        sync.WaitGroup
+	resultCloseOnce sync.Once
 }
 
 type MetricsSummary struct {
@@ -352,7 +359,9 @@ func InitEngine(target string) *EngineInfo {
 	if len(conf.GlobalConfig.ScopeConf.IncludeDomains) > 0 {
 		scopeCfg.IncludeDomains = conf.GlobalConfig.ScopeConf.IncludeDomains
 	}
-	scopeCfg.IncludeSubdomains = conf.GlobalConfig.ScopeConf.IncludeSubdomains
+	if conf.GlobalConfig.ScopeConf.IncludeSubdomains != nil {
+		scopeCfg.IncludeSubdomains = *conf.GlobalConfig.ScopeConf.IncludeSubdomains
+	}
 	if len(conf.GlobalConfig.ScopeConf.IncludePaths) > 0 {
 		scopeCfg.IncludePaths = conf.GlobalConfig.ScopeConf.IncludePaths
 	}
@@ -371,10 +380,14 @@ func InitEngine(target string) *EngineInfo {
 	if len(conf.GlobalConfig.ScopeConf.ExcludeExtensions) > 0 {
 		scopeCfg.ExcludeExtensions = conf.GlobalConfig.ScopeConf.ExcludeExtensions
 	}
-	scopeCfg.ExcludeCDN = conf.GlobalConfig.ScopeConf.ExcludeCDN
-	scopeCfg.ExcludeExternal = conf.GlobalConfig.ScopeConf.ExcludeExternal
-	if conf.GlobalConfig.ScopeConf.MaxDepth > 0 {
-		scopeCfg.MaxDepth = conf.GlobalConfig.ScopeConf.MaxDepth
+	if conf.GlobalConfig.ScopeConf.ExcludeCDN != nil {
+		scopeCfg.ExcludeCDN = *conf.GlobalConfig.ScopeConf.ExcludeCDN
+	}
+	if conf.GlobalConfig.ScopeConf.ExcludeExternal != nil {
+		scopeCfg.ExcludeExternal = *conf.GlobalConfig.ScopeConf.ExcludeExternal
+	}
+	if conf.GlobalConfig.ScopeConf.MaxDepth != nil {
+		scopeCfg.MaxDepth = *conf.GlobalConfig.ScopeConf.MaxDepth
 	}
 	engineInfo.ScopeController = NewScopeController(target, scopeCfg)
 
@@ -491,11 +504,11 @@ func (ei *EngineInfo) Start() error {
 				log.Logger.Infof("resuming %d pending URLs from previous crawl", len(pendingURLs))
 				for _, pending := range pendingURLs {
 					ei.PushStaticUrl(&UrlInfo{
-						Url:       pending.URL,
-						Hash:      pending.Hash,
-						Depth:     pending.Depth,
-						SourceUrl: pending.SourceURL,
-						SourceType: "incremental_resume",
+						Url:        pending.URL,
+						Hash:       pending.Hash,
+						Depth:      pending.Depth,
+						SourceUrl:  pending.SourceURL,
+						SourceType: SourceTypeIncrementalResume,
 					})
 				}
 			}
@@ -510,7 +523,7 @@ func (ei *EngineInfo) Start() error {
 		log.Logger.Debugf("metadata parse: %s", staticUrl)
 		go func(staticUrl string) {
 			defer metadataWg.Done()
-			ei.PushStaticUrl(&UrlInfo{Url: staticUrl, SourceType: "metadata parse", SourceUrl: "robots.txt|sitemap.xml", Depth: 0})
+			ei.PushStaticUrl(&UrlInfo{Url: staticUrl, SourceType: SourceTypeMetadata, SourceUrl: "robots.txt|sitemap.xml", Depth: 0})
 		}(staticUrl)
 	}
 	// 等待 metadata 爬取完成
@@ -518,7 +531,7 @@ func (ei *EngineInfo) Start() error {
 
 	// P3优化: GraphQL 端点发现
 	if ei.GraphQLDiscoverer != nil && ei.GraphQLDiscoverer.config.Enabled {
-		go func() {
+		ei.runBackground("graphql_discovery", func() {
 			endpoints := ei.GraphQLDiscoverer.DiscoverFromBaseURL(ei.Target)
 			if len(endpoints) > 0 {
 				log.Logger.Infof("graphql: discovered %d endpoints", len(endpoints))
@@ -527,12 +540,12 @@ func (ei *EngineInfo) Start() error {
 					ei.GraphQLDiscoverer.IntrospectAll()
 				}
 			}
-		}()
+		})
 	}
 
 	// P3优化: Swagger/OpenAPI 端点发现
 	if ei.SwaggerDiscoverer != nil && ei.SwaggerDiscoverer.config.Enabled {
-		go func() {
+		ei.runBackground("swagger_discovery", func() {
 			specs := ei.SwaggerDiscoverer.DiscoverFromBaseURL(ei.Target)
 			if len(specs) > 0 {
 				log.Logger.Infof("swagger: discovered %d specs, extracting endpoints...", len(specs))
@@ -543,12 +556,12 @@ func (ei *EngineInfo) Start() error {
 				}
 				log.Logger.Infof("swagger: submitted %d API endpoints to crawler", len(urlInfos))
 			}
-		}()
+		})
 	}
 
 	// P4优化: 被动源发现 (Wayback, CommonCrawl 等历史URL)
 	if ei.PassiveSourceDiscoverer != nil && ei.PassiveSourceDiscoverer.config.Enabled {
-		go func() {
+		ei.runBackground("passive_source_discovery", func() {
 			log.Logger.Infof("passive sources: starting historical URL discovery for %s", ei.HostName)
 			urls := ei.PassiveSourceDiscoverer.DiscoverFromDomain(ei.HostName)
 			if len(urls) > 0 {
@@ -567,18 +580,18 @@ func (ei *EngineInfo) Start() error {
 				}
 				log.Logger.Infof("passive sources: submitted %d URLs to crawler", len(urlInfos))
 			}
-		}()
+		})
 	}
 
 	for _, seed := range conf.GlobalConfig.SeedList {
 		if seed == "" {
 			continue
 		}
-		ei.PushStaticUrl(&UrlInfo{Url: seed, SourceType: "seed", SourceUrl: "seedfile", Depth: 0})
+		ei.PushStaticUrl(&UrlInfo{Url: seed, SourceType: SourceTypeSeed, SourceUrl: "seedfile", Depth: 0})
 	}
 	// 打开第一个tab页面 这里应该提交url管道任务
 	// go ei.NewTab(&UrlInfo{Url: ei.Target, Depth: 0, SourceType: "homePage", SourceUrl: "target"}, HOME_PAGE_FLAG)
-	ei.PushStaticUrl(&UrlInfo{Url: ei.Target, Depth: 0, SourceType: "homePage", SourceUrl: "target"})
+	ei.PushStaticUrl(&UrlInfo{Url: ei.Target, Depth: 0, SourceType: SourceTypeHomePage, SourceUrl: "target"})
 	ei.TimeoutReasons = make(map[string]int)
 	ei.Page404Samples = ei.fetch404Samples(3)
 	// dev模式的时候不会结束 为了从浏览器界面调试查看需要手动关闭
@@ -594,6 +607,9 @@ func (ei *EngineInfo) Start() error {
 
 func (ei *EngineInfo) PushStaticUrl(uif *UrlInfo) {
 	if ei.Scheduler == nil || uif == nil {
+		return
+	}
+	if atomic.LoadInt32(&ei.stopping) == 1 {
 		return
 	}
 	if !ei.prepareUrl(uif) {
@@ -656,7 +672,7 @@ func (ei *EngineInfo) prepareUrl(uif *UrlInfo) bool {
 				go func(pURL string) {
 					ei.PushStaticUrl(&UrlInfo{
 						Url:        pURL,
-						SourceType: "path_climbing",
+						SourceType: SourceTypePathClimb,
 						SourceUrl:  canonical,
 						Depth:      uif.Depth,
 					})
@@ -824,33 +840,33 @@ func (ei *EngineInfo) DelBrowser(delb *rod.Browser, delo *launcher.Launcher) {
 	ei.Mutex.Unlock()
 }
 func (ei *EngineInfo) Finish() {
-	// 1. 任务完成 2. 程序超时
-	taskOverChan := make(chan bool, 1)
-	go func() {
-		// 任务完成
-		// 当第一个页面访问完成后才会关闭
-		<-ei.FirstPageCloseChan
-		log.Logger.Debug("------------------------first page over------------------------")
-		// url队列为空 没有新增的url需要测试了
-		ei.waitSchedulerIdle()
-		log.Logger.Debug("------------------------scheduler idle------------------------")
-		taskOverChan <- true
-	}()
-	select {
-	case <-taskOverChan:
-		log.Logger.Debug("------------------------task over------------------------")
-	// 整体超时
-	case <-time.After(time.Duration(conf.GlobalConfig.BrowserConf.BrowserTimeout) * time.Second):
-		log.Logger.Warnf("------------------------Argo Exec timeout %ds close exit", conf.GlobalConfig.BrowserConf.BrowserTimeout)
-		ei.Close()
+	timeoutSec := conf.GlobalConfig.BrowserConf.BrowserTimeout
+	if timeoutSec <= 0 {
+		timeoutSec = 3600
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
+	defer cancel()
+
+	// 等待全局“稳定空闲”，避免误判：Scheduler 需要包含 StandardEngine/后台发现任务。
+	idle := ei.waitGlobalIdle(ctx, 2*time.Second)
+	if idle {
+		log.Logger.Debug("------------------------global idle------------------------")
+	} else {
+		log.Logger.Warnf("------------------------Argo Exec timeout %ds close exit", timeoutSec)
+	}
+
+	atomic.StoreInt32(&ei.stopping, 1)
 	log.Logger.Debug("------------------------Close NormalizeQueue------------------------")
 	ei.CloseNormalizeQueue()
 	ei.PendingNormalizeQueueEmpty()
+	ei.Close()
 }
 
 func (ei *EngineInfo) Close() {
-	ei.SaveResult()
+	// 先停止双引擎(StandardEngine)避免继续提交结果/URL
+	if ei.DualEngine != nil {
+		ei.DualEngine.Stop()
+	}
 
 	// P3优化: 停止增量爬取 (优先保存状态)
 	if ei.IncrementalCrawler != nil {

@@ -12,13 +12,14 @@
 2. 智能登录网站 暂不支持有验证码的情况
 3. 支持hook全流量 通过go-rod的 HijackRequests 获取浏览器的全部流量输出请求及响应内容
 4. 对URL进行去重 最后输出存储的都是去重后的
-5. 支持多格式结果输出 txt、json、xlsx、html
+5. 支持多格式结果输出 txt、json、xlsx、html、jsonl
 6. 支持 回放yaml格式的脚本 会按照顺序执行操作
 7. 支持开启浏览器界面 支持debug输出
 8. 支持代理
 9. 支持url深度层数控制
 10. 支持控制是否存储完整请求响应base64字符串 json格式
 11. 支持程序自动升级 
+12. 支持输出 URL 发现来源（SourceType/SourceUrl），便于排查“URL 从哪里来的”
 
 
 ## 安装
@@ -77,7 +78,7 @@ GLOBAL OPTIONS:
 
    OutPut
 
-   --format value  Output format separated by commas, txt, json, xlsx, html supported. (default: "txt,json")
+   --format value  Output formats separated by commas, e.g. txt,json,xlsx,html,jsonl. (default: "txt,json")
    --save value    Result saved as 'target' by default. Use '--save test' to save as 'test'.
 
    Update
@@ -207,6 +208,16 @@ debug输出会输出详细的泛化去重 解析url等信息 如下图
 excel表格输出结果如下  
 
 ![](imgs/result_excel.jpg)
+
+### URL 来源标记（SourceType / SourceUrl）
+
+从 HTML/JS/交互/流量劫持等链路发现到的 URL，都会带上来源信息，并贯穿到终端输出与结果落盘。
+
+- 终端输出示例：`[GET][js_inline] http://a/b <- http://a/page`
+- `SourceType`：来源类别（例如 `html_attr/js_inline/js_file/html_form/browser_hijack/interaction_auto` 等）
+- `SourceUrl`：来源 URL（通常是父页面/Referer/触发点）
+
+`txt/json/jsonl/xlsx/html` 均会包含 `SourceType` 与 `SourceUrl` 字段/列。
 
 ### 使用 Seed URL 列表
 

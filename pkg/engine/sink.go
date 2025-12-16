@@ -35,7 +35,7 @@ func (s *textSink) Name() string { return "txt" }
 func (s *textSink) Save(ei *EngineInfo, path string) error {
 	txt := ""
 	for _, r := range ei.ResultList {
-		txt += fmt.Sprintf("[%s]%s\n", r.Method, r.URL)
+		txt += fmt.Sprintf("[%s][%s]%s\t%s\n", r.Method, r.SourceType, r.URL, r.SourceUrl)
 	}
 	ei.writeResult(path, []byte(txt))
 	return nil
@@ -51,21 +51,25 @@ func (s *xlsxSink) Save(ei *EngineInfo, path string) error {
 	if err != nil {
 		return err
 	}
-	titles := []string{"method", "url", "data", "status"}
+	titles := []string{"method", "url", "source_type", "source_url", "data", "status"}
 	row := sheet.AddRow()
 	for _, title := range titles {
 		cell := row.AddCell()
 		cell.Value = title
 	}
-	sheet.SetColWidth(0, 0, 5)
-	sheet.SetColWidth(1, 1, 80)
-	sheet.SetColWidth(2, 2, 80)
-	sheet.SetColWidth(3, 3, 5)
+	sheet.SetColWidth(0, 0, 8)  // method
+	sheet.SetColWidth(1, 1, 80) // url
+	sheet.SetColWidth(2, 2, 20) // source_type
+	sheet.SetColWidth(3, 3, 80) // source_url
+	sheet.SetColWidth(4, 4, 80) // data
+	sheet.SetColWidth(5, 5, 8)  // status
 	for _, data := range ei.ResultList {
 		row = sheet.AddRow()
 		values := []string{
 			data.Method,
 			data.URL,
+			data.SourceType,
+			data.SourceUrl,
 			data.Data,
 			strconv.Itoa(data.Status),
 		}

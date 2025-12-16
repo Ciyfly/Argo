@@ -1,0 +1,1 @@
+2025-11-16：修复 Windows 下偶发 page.Nil 导致 tab.go panic 的问题。NewTab 中在 browser.Page 返回 error 或 page==nil 时记录具体 URL 与错误、提前结束并正常关闭 tab，避免调用 page.Reload() 触发空指针。

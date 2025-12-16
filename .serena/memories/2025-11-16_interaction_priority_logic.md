@@ -1,0 +1,1 @@
+2025-11-16：更新 pkg/engine/interaction.go，根据页面内容动态决定先运行 auto 还是 login。新增 shouldPrioritizeLogin()，通过 JS 统计 DOM 元素数量和文本中是否包含登录/验证码关键词，如果页面几乎只有登录信息则先执行 login，否则先执行 auto，再按 login->playback 顺序运行。添加 reorderInteractions 帮助函数。

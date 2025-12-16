@@ -1,0 +1,1 @@
+2025-11-16：为解决 Windows CLI 色彩与 leakless.exe 冲突，因 Serena 无法直接处理 import，降级到 apply_patch。修改 pkg/log/log.go 让 Windows 输出使用 colorable 适配 ANSI，修改 pkg/engine/engine.go 在 Windows 禁用 rod leakless 并维持单进程模式。回滚可通过 git checkout pkg/log/log.go pkg/engine/engine.go。

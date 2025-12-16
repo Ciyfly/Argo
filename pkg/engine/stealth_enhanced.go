@@ -24,108 +24,108 @@ type EnhancedStealth struct {
 
 // BrowserFingerprint 浏览器指纹配置
 type BrowserFingerprint struct {
-	UserAgent         string
-	Platform          string
-	Languages         []string
-	Vendor            string
+	UserAgent           string
+	Platform            string
+	Languages           []string
+	Vendor              string
 	HardwareConcurrency int
-	DeviceMemory      int
-	ScreenWidth       int
-	ScreenHeight      int
-	ColorDepth        int
-	PixelRatio        float64
-	Timezone          string
-	WebGLVendor       string
-	WebGLRenderer     string
-	AudioContext      bool
+	DeviceMemory        int
+	ScreenWidth         int
+	ScreenHeight        int
+	ColorDepth          int
+	PixelRatio          float64
+	Timezone            string
+	WebGLVendor         string
+	WebGLRenderer       string
+	AudioContext        bool
 }
 
 // DefaultFingerprints 预定义的真实浏览器指纹
 var DefaultFingerprints = []*BrowserFingerprint{
 	// Windows Chrome
 	{
-		UserAgent:         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-		Platform:          "Win32",
-		Languages:         []string{"zh-CN", "zh", "en-US", "en"},
-		Vendor:            "Google Inc.",
+		UserAgent:           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+		Platform:            "Win32",
+		Languages:           []string{"zh-CN", "zh", "en-US", "en"},
+		Vendor:              "Google Inc.",
 		HardwareConcurrency: 8,
-		DeviceMemory:      8,
-		ScreenWidth:       1920,
-		ScreenHeight:      1080,
-		ColorDepth:        24,
-		PixelRatio:        1.0,
-		Timezone:          "Asia/Shanghai",
-		WebGLVendor:       "Google Inc. (NVIDIA)",
-		WebGLRenderer:     "ANGLE (NVIDIA, NVIDIA GeForce GTX 1060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
-		AudioContext:      true,
+		DeviceMemory:        8,
+		ScreenWidth:         1920,
+		ScreenHeight:        1080,
+		ColorDepth:          24,
+		PixelRatio:          1.0,
+		Timezone:            "Asia/Shanghai",
+		WebGLVendor:         "Google Inc. (NVIDIA)",
+		WebGLRenderer:       "ANGLE (NVIDIA, NVIDIA GeForce GTX 1060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+		AudioContext:        true,
 	},
 	// Windows Chrome 2
 	{
-		UserAgent:         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-		Platform:          "Win32",
-		Languages:         []string{"en-US", "en"},
-		Vendor:            "Google Inc.",
+		UserAgent:           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+		Platform:            "Win32",
+		Languages:           []string{"en-US", "en"},
+		Vendor:              "Google Inc.",
 		HardwareConcurrency: 4,
-		DeviceMemory:      16,
-		ScreenWidth:       2560,
-		ScreenHeight:      1440,
-		ColorDepth:        24,
-		PixelRatio:        1.0,
-		Timezone:          "America/New_York",
-		WebGLVendor:       "Google Inc. (Intel)",
-		WebGLRenderer:     "ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)",
-		AudioContext:      true,
+		DeviceMemory:        16,
+		ScreenWidth:         2560,
+		ScreenHeight:        1440,
+		ColorDepth:          24,
+		PixelRatio:          1.0,
+		Timezone:            "America/New_York",
+		WebGLVendor:         "Google Inc. (Intel)",
+		WebGLRenderer:       "ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+		AudioContext:        true,
 	},
 	// Mac Chrome
 	{
-		UserAgent:         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-		Platform:          "MacIntel",
-		Languages:         []string{"zh-CN", "zh", "en-US", "en"},
-		Vendor:            "Google Inc.",
+		UserAgent:           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+		Platform:            "MacIntel",
+		Languages:           []string{"zh-CN", "zh", "en-US", "en"},
+		Vendor:              "Google Inc.",
 		HardwareConcurrency: 8,
-		DeviceMemory:      8,
-		ScreenWidth:       1440,
-		ScreenHeight:      900,
-		ColorDepth:        30,
-		PixelRatio:        2.0,
-		Timezone:          "Asia/Shanghai",
-		WebGLVendor:       "Apple Inc.",
-		WebGLRenderer:     "Apple M1 Pro",
-		AudioContext:      true,
+		DeviceMemory:        8,
+		ScreenWidth:         1440,
+		ScreenHeight:        900,
+		ColorDepth:          30,
+		PixelRatio:          2.0,
+		Timezone:            "Asia/Shanghai",
+		WebGLVendor:         "Apple Inc.",
+		WebGLRenderer:       "Apple M1 Pro",
+		AudioContext:        true,
 	},
 	// Windows Firefox
 	{
-		UserAgent:         "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
-		Platform:          "Win32",
-		Languages:         []string{"zh-CN", "zh", "en-US", "en"},
-		Vendor:            "",
+		UserAgent:           "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
+		Platform:            "Win32",
+		Languages:           []string{"zh-CN", "zh", "en-US", "en"},
+		Vendor:              "",
 		HardwareConcurrency: 8,
-		DeviceMemory:      0, // Firefox 不暴露此属性
-		ScreenWidth:       1920,
-		ScreenHeight:      1080,
-		ColorDepth:        24,
-		PixelRatio:        1.0,
-		Timezone:          "Asia/Shanghai",
-		WebGLVendor:       "Intel",
-		WebGLRenderer:     "Intel(R) UHD Graphics 630",
-		AudioContext:      true,
+		DeviceMemory:        0, // Firefox 不暴露此属性
+		ScreenWidth:         1920,
+		ScreenHeight:        1080,
+		ColorDepth:          24,
+		PixelRatio:          1.0,
+		Timezone:            "Asia/Shanghai",
+		WebGLVendor:         "Intel",
+		WebGLRenderer:       "Intel(R) UHD Graphics 630",
+		AudioContext:        true,
 	},
 	// Windows Edge
 	{
-		UserAgent:         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Edg/121.0.0.0",
-		Platform:          "Win32",
-		Languages:         []string{"zh-CN", "zh", "en-US", "en"},
-		Vendor:            "Google Inc.",
+		UserAgent:           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Edg/121.0.0.0",
+		Platform:            "Win32",
+		Languages:           []string{"zh-CN", "zh", "en-US", "en"},
+		Vendor:              "Google Inc.",
 		HardwareConcurrency: 12,
-		DeviceMemory:      32,
-		ScreenWidth:       3840,
-		ScreenHeight:      2160,
-		ColorDepth:        24,
-		PixelRatio:        1.5,
-		Timezone:          "Asia/Shanghai",
-		WebGLVendor:       "Google Inc. (AMD)",
-		WebGLRenderer:     "ANGLE (AMD, AMD Radeon RX 6800 XT Direct3D11 vs_5_0 ps_5_0, D3D11)",
-		AudioContext:      true,
+		DeviceMemory:        32,
+		ScreenWidth:         3840,
+		ScreenHeight:        2160,
+		ColorDepth:          24,
+		PixelRatio:          1.5,
+		Timezone:            "Asia/Shanghai",
+		WebGLVendor:         "Google Inc. (AMD)",
+		WebGLRenderer:       "ANGLE (AMD, AMD Radeon RX 6800 XT Direct3D11 vs_5_0 ps_5_0, D3D11)",
+		AudioContext:        true,
 	},
 }
 
@@ -175,7 +175,7 @@ func (es *EnhancedStealth) GenerateStealthScript() string {
 	}
 
 	return fmt.Sprintf(`
-(function() {
+function() {
 	'use strict';
 
 	// ===== 核心反检测 =====
@@ -339,19 +339,27 @@ func (es *EnhancedStealth) GenerateStealthScript() string {
 	});
 
 	// 9. 伪装 permissions API
-	const originalQuery = navigator.permissions.query;
-	navigator.permissions.query = function(params) {
-		if (params.name === 'notifications') {
+	const permissions = navigator.permissions;
+	const originalQuery = permissions && typeof permissions.query === 'function'
+		? permissions.query.bind(permissions)
+		: null;
+	if (permissions) {
+		permissions.query = function(params) {
+			if (params && params.name === 'notifications') {
+				return Promise.resolve({ state: 'prompt', onchange: null });
+			}
+			if (params && params.name === 'push') {
+				return Promise.resolve({ state: 'prompt', onchange: null });
+			}
+			if (params && params.name === 'midi') {
+				return Promise.resolve({ state: 'prompt', onchange: null });
+			}
+			if (originalQuery) {
+				return originalQuery(params);
+			}
 			return Promise.resolve({ state: 'prompt', onchange: null });
-		}
-		if (params.name === 'push') {
-			return Promise.resolve({ state: 'prompt', onchange: null });
-		}
-		if (params.name === 'midi') {
-			return Promise.resolve({ state: 'prompt', onchange: null });
-		}
-		return originalQuery.call(this, params);
-	};
+		};
+	}
 
 	// 10. 伪装 connection API
 	Object.defineProperty(navigator, 'connection', {
@@ -436,22 +444,24 @@ func (es *EnhancedStealth) GenerateStealthScript() string {
 
 	// 15. 伪装 iframe contentWindow
 	const originalContentWindow = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'contentWindow');
-	Object.defineProperty(HTMLIFrameElement.prototype, 'contentWindow', {
-		get: function() {
-			const win = originalContentWindow.get.call(this);
-			if (win) {
-				try {
-					Object.defineProperty(win.navigator, 'webdriver', { get: () => undefined });
-				} catch(e) {}
+	if (originalContentWindow && originalContentWindow.get) {
+		Object.defineProperty(HTMLIFrameElement.prototype, 'contentWindow', {
+			get: function() {
+				const win = originalContentWindow.get.call(this);
+				if (win) {
+					try {
+						Object.defineProperty(win.navigator, 'webdriver', { get: () => undefined });
+					} catch(e) {}
+				}
+				return win;
 			}
-			return win;
-		}
-	});
+		});
+	}
 
 	// 16. 防止 toString 检测
 	const nativeToString = Function.prototype.toString;
 	Function.prototype.toString = function() {
-		if (this === navigator.permissions.query) {
+		if (permissions && this === permissions.query) {
 			return 'function query() { [native code] }';
 		}
 		if (this === navigator.getBattery) {
@@ -461,7 +471,7 @@ func (es *EnhancedStealth) GenerateStealthScript() string {
 	};
 
 	console.log('[Argo Enhanced Stealth] Fingerprint protection active');
-})();
+}
 `,
 		fp.Platform,
 		fp.Vendor,

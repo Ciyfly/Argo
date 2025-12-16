@@ -181,6 +181,8 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 					URL:             ctx.Request.URL().String(),
 					Method:          ctx.Request.Method(),
 					Host:            ctx.Request.Req().Host,
+					SourceType:      SourceTypeBrowserHijack,
+					SourceUrl:       uif.Url,
 					Headers:         ctx.Request.Req().Header,
 					Data:            string(saveBytes),
 					ResponseHeaders: transformHttpHeaders(ctx.Response.Payload().ResponseHeaders),
@@ -253,7 +255,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 		// 创建tab
 		if !req.CheckTarget(uif.Url) {
 			log.Logger.Debugf("CheckTarget: %s ", uif.Url)
-			tabDone <- true
+			ei.NormalCloseTab(browserInfo)
 			return
 		}
 		setStage("open_page")
@@ -372,7 +374,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 			PushUrlWg.Add(1)
 			go func(currentUrl string) {
 				defer PushUrlWg.Done()
-				ei.PushStaticUrl(&UrlInfo{Url: info.URL, SourceType: "patch", SourceUrl: uif.Url, Depth: uif.Depth + 1})
+				ei.PushStaticUrl(&UrlInfo{Url: info.URL, SourceType: SourceTypePatch, SourceUrl: uif.Url, Depth: uif.Depth + 1})
 			}(currentUrl)
 		}
 		// 所有url提交完成才能结束
@@ -614,6 +616,8 @@ func (ei *EngineInfo) NewTabWithPool(uif *UrlInfo, pageFlag int) {
 					URL:             ctx.Request.URL().String(),
 					Method:          ctx.Request.Method(),
 					Host:            ctx.Request.Req().Host,
+					SourceType:      SourceTypeBrowserHijack,
+					SourceUrl:       uif.Url,
 					Headers:         ctx.Request.Req().Header,
 					Data:            string(saveBytes),
 					ResponseHeaders: transformHttpHeaders(ctx.Response.Payload().ResponseHeaders),
@@ -692,7 +696,7 @@ func (ei *EngineInfo) NewTabWithPool(uif *UrlInfo, pageFlag int) {
 		// 创建tab
 		if !req.CheckTarget(uif.Url) {
 			log.Logger.Debugf("CheckTarget: %s ", uif.Url)
-			tabDone <- true
+			ei.NormalCloseTab(browserInfo)
 			return
 		}
 		setStage("open_page")
@@ -835,7 +839,7 @@ func (ei *EngineInfo) NewTabWithPool(uif *UrlInfo, pageFlag int) {
 			PushUrlWg.Add(1)
 			go func(currentUrl string) {
 				defer PushUrlWg.Done()
-				ei.PushStaticUrl(&UrlInfo{Url: info.URL, SourceType: "patch", SourceUrl: uif.Url, Depth: uif.Depth + 1})
+				ei.PushStaticUrl(&UrlInfo{Url: info.URL, SourceType: SourceTypePatch, SourceUrl: uif.Url, Depth: uif.Depth + 1})
 			}(currentUrl)
 		}
 

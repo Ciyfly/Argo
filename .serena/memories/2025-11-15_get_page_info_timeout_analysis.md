@@ -1,0 +1,1 @@
+2025-11-15：排查 tab 超时 stage="get_page_info"。在 pkg/engine/tab.go:183-207 内 stage 只在调用 utils.GetPageInfoByPage(page) 前被更新一次，之后所有耗时步骤（page.HTML、inject.InjectScript、runPageMiddlewares、interaction Auto 脚本等）未再更新 stage，导致日志恒为 get_page_info。utils.GetPageInfoByPage(pkg/utils/page.go:9-29) 只是 rod.Page.Info() 的薄封装，若需要诊断需给 page.Info 增加超时/调试日志并细化 stage 切换。

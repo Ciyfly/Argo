@@ -87,7 +87,7 @@ func (ei *EngineInfo) fetchAndParseResource(source string, depth int) {
 		if target == "" {
 			continue
 		}
-		ei.PushStaticUrl(&UrlInfo{Url: target, SourceType: "resource", SourceUrl: source, Depth: depth})
+		ei.PushStaticUrl(&UrlInfo{Url: target, SourceType: SourceTypeResource, SourceUrl: source, Depth: depth})
 	}
 }
 

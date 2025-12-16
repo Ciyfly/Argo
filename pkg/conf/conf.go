@@ -86,7 +86,7 @@ passive_sources:
 scope:
   include_subdomains: true # 包含子域名
   exclude_cdn: true # 排除 CDN 域名
-  exclude_external: false # 排除外部链接
+  exclude_external: true # 排除外部链接
   max_depth: 10 # 最大爬取深度
 path_climbing:
   enabled: true # 是否启用路径爬升
@@ -211,16 +211,16 @@ type PassiveSourceConf struct {
 // ScopeConf 作用域控制配置 (P4优化)
 type ScopeConf struct {
 	IncludeDomains    []string `yaml:"include_domains"`    // 包含的域名
-	IncludeSubdomains bool     `yaml:"include_subdomains"` // 包含子域名
+	IncludeSubdomains *bool    `yaml:"include_subdomains"` // 包含子域名(为空表示使用默认值)
 	IncludePaths      []string `yaml:"include_paths"`      // 包含的路径前缀
 	IncludePatterns   []string `yaml:"include_patterns"`   // 包含的正则模式
 	ExcludeDomains    []string `yaml:"exclude_domains"`    // 排除的域名
 	ExcludePaths      []string `yaml:"exclude_paths"`      // 排除的路径前缀
 	ExcludePatterns   []string `yaml:"exclude_patterns"`   // 排除的正则模式
 	ExcludeExtensions []string `yaml:"exclude_extensions"` // 排除的扩展名
-	ExcludeCDN        bool     `yaml:"exclude_cdn"`        // 排除 CDN 域名
-	ExcludeExternal   bool     `yaml:"exclude_external"`   // 排除外部链接
-	MaxDepth          int      `yaml:"max_depth"`          // 最大爬取深度
+	ExcludeCDN        *bool    `yaml:"exclude_cdn"`        // 排除 CDN 域名(为空表示使用默认值)
+	ExcludeExternal   *bool    `yaml:"exclude_external"`   // 排除外部链接(为空表示使用默认值)
+	MaxDepth          *int     `yaml:"max_depth"`          // 最大爬取深度(为空表示使用默认值)
 }
 
 // PathClimbingConf 路径爬升配置 (P4优化)
@@ -279,9 +279,9 @@ type BrowserConf struct {
 	MaxRetries       int    `yaml:"max_retries"`
 	DisableLeakless  bool   `yaml:"disable_leakless"`
 	// P0优化: 浏览器池配置
-	EnablePool       bool   `yaml:"enable_pool"`        // 是否启用浏览器池
-	PoolMaxInstances int    `yaml:"pool_max_instances"` // 池最大实例数
-	PoolMaxTabs      int    `yaml:"pool_max_tabs"`      // 每实例最大Tab数
+	EnablePool       bool `yaml:"enable_pool"`        // 是否启用浏览器池
+	PoolMaxInstances int  `yaml:"pool_max_instances"` // 池最大实例数
+	PoolMaxTabs      int  `yaml:"pool_max_tabs"`      // 每实例最大Tab数
 }
 
 // auto 自动触发的一些参数

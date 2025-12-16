@@ -16,9 +16,12 @@ import (
 // 泛化去重
 
 type PendingUrl struct {
-	URL             string
-	Method          string
-	Host            string
+	URL    string
+	Method string
+	Host   string
+	// SourceType/SourceUrl 用于描述该 URL 的“发现来源”
+	SourceType      string
+	SourceUrl       string
 	Headers         http.Header
 	Data            string
 	Status          int
@@ -33,18 +36,18 @@ var (
 	uuidRegex      = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 	hexRegex       = regexp.MustCompile(`(?i)^[0-9a-f]+$`)
 	dateRegex      = regexp.MustCompile(`^\d{4}-\d{1,2}-\d{1,2}$`)
-	timestampRegex = regexp.MustCompile(`^\d{10,13}$`)                                                    // Unix 时间戳
-	versionRegex   = regexp.MustCompile(`^v?\d+(\.\d+)*$`)                                                // 版本号
-	base64Regex    = regexp.MustCompile(`^[A-Za-z0-9+/]{20,}={0,2}$`)                                     // Base64
-	jwtRegex       = regexp.MustCompile(`^eyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*$`)         // JWT
-	objectIdRegex  = regexp.MustCompile(`^[0-9a-fA-F]{24}$`)                                              // MongoDB ObjectId
-	shortHashRegex = regexp.MustCompile(`^[0-9a-fA-F]{7,8}$`)                                             // Git short hash
-	emailRegex     = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)               // Email
-	ipv4Regex      = regexp.MustCompile(`^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$`)                           // IPv4
-	phoneRegex     = regexp.MustCompile(`^1[3-9]\d{9}$`)                                                  // 手机号
-	idCardRegex    = regexp.MustCompile(`^\d{17}[\dXx]$`)                                                 // 身份证
-	fileHashRegex  = regexp.MustCompile(`^[a-fA-F0-9]{32}$|^[a-fA-F0-9]{40}$|^[a-fA-F0-9]{64}$`)         // MD5/SHA1/SHA256
-	snowflakeRegex = regexp.MustCompile(`^\d{18,19}$`)                                                   // Snowflake ID
+	timestampRegex = regexp.MustCompile(`^\d{10,13}$`)                                            // Unix 时间戳
+	versionRegex   = regexp.MustCompile(`^v?\d+(\.\d+)*$`)                                        // 版本号
+	base64Regex    = regexp.MustCompile(`^[A-Za-z0-9+/]{20,}={0,2}$`)                             // Base64
+	jwtRegex       = regexp.MustCompile(`^eyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*$`) // JWT
+	objectIdRegex  = regexp.MustCompile(`^[0-9a-fA-F]{24}$`)                                      // MongoDB ObjectId
+	shortHashRegex = regexp.MustCompile(`^[0-9a-fA-F]{7,8}$`)                                     // Git short hash
+	emailRegex     = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)       // Email
+	ipv4Regex      = regexp.MustCompile(`^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$`)                   // IPv4
+	phoneRegex     = regexp.MustCompile(`^1[3-9]\d{9}$`)                                          // 手机号
+	idCardRegex    = regexp.MustCompile(`^\d{17}[\dXx]$`)                                         // 身份证
+	fileHashRegex  = regexp.MustCompile(`^[a-fA-F0-9]{32}$|^[a-fA-F0-9]{40}$|^[a-fA-F0-9]{64}$`)  // MD5/SHA1/SHA256
+	snowflakeRegex = regexp.MustCompile(`^\d{18,19}$`)                                            // Snowflake ID
 )
 
 func (ei *EngineInfo) InitNormalize() {
@@ -63,6 +66,10 @@ func (ei *EngineInfo) pushPendingNormalizeQueue(pu *PendingUrl) {
 	if ei.NormalizeCloseChanFlag {
 		return
 	}
+	defer func() {
+		// 收尾阶段可能出现关闭管道与生产并发，避免因 send on closed channel 直接崩溃。
+		_ = recover()
+	}()
 	ei.PendingNormalizeQueue <- pu
 }
 

@@ -66,6 +66,18 @@ var urlAttributes = map[string]bool{
 // srcsetSeparators 用于解析 srcset 属性
 var srcsetSeparators = []string{",", " "}
 
+// DiscoveredURL 用于携带“URL + 来源类型”。
+// SourceType 取值约定：
+// - html_attr：HTML 标签属性(href/src/action/srcset/meta refresh等)
+// - js_inline：HTML 内联 <script> 提取
+// - html_text：HTML 文本/可见内容中匹配到的 URL
+// - html_comment：HTML 注释中匹配到的 URL
+// - html_form：表单(action/method) 生成的 URL
+type DiscoveredURL struct {
+	URL        string
+	SourceType string
+}
+
 func getUrlByTag(t xhtml.Token, currentUrl string) []string {
 	attr := t.Attr
 	urls := []string{}
@@ -87,18 +99,23 @@ func getUrlByTag(t xhtml.Token, currentUrl string) []string {
 				continue
 			}
 
-			// 特殊处理 meta refresh content 属性
-			if key == "content" && strings.Contains(strings.ToLower(val), "url=") {
-				metaUrl := parseMetaRefresh(val)
-				if metaUrl != "" {
-					if resolved := HandlerUrl(metaUrl, currentUrl); resolved != "" {
-						urls = append(urls, resolved)
+			// 特殊处理 meta refresh content 属性：
+			// 只在 content 中包含 url= 时认为它是跳转 URL；否则(如 charset)直接忽略。
+			if key == "content" {
+				if strings.Contains(strings.ToLower(val), "url=") {
+					metaUrl := parseMetaRefresh(val)
+					if metaUrl != "" {
+						if resolved := HandlerUrl(metaUrl, currentUrl); resolved != "" {
+							urls = append(urls, resolved)
+						}
 					}
 				}
 				continue
 			}
 
-			log.Logger.Debugf("getUrlByTag attr=%s value=%s", key, val)
+			if log.Logger != nil {
+				log.Logger.Debugf("getUrlByTag attr=%s value=%s", key, val)
+			}
 			if resolved := HandlerUrl(val, currentUrl); resolved != "" {
 				urls = append(urls, resolved)
 			}
@@ -156,6 +173,7 @@ func parseMetaRefresh(content string) string {
 	url = strings.Trim(url, "'\"")
 	return url
 }
+
 // urlTags 需要解析 URL 属性的标签
 var urlTags = map[string]bool{
 	// 链接相关
@@ -196,19 +214,30 @@ var urlTags = map[string]bool{
 	"th":         true, // background 属性
 }
 
-func ParseHtml(htmlStr, currentUrl string) []string {
-	staticUrlList := []string{}
+// ParseHtmlWithSource 解析 HTML 并返回带来源类型的 URL 列表。
+func ParseHtmlWithSource(htmlStr, currentUrl string) []DiscoveredURL {
+	discovered := make([]DiscoveredURL, 0, 64)
+
 	// 解析 html 获取所有的 url
 	tkn := xhtml.NewTokenizer(strings.NewReader(htmlStr))
 	var tag string
 	var inScript bool
 	var scriptContent strings.Builder
 
+	appendURLs := func(urls []string, sourceType string) {
+		for _, u := range urls {
+			if u == "" {
+				continue
+			}
+			discovered = append(discovered, DiscoveredURL{URL: u, SourceType: sourceType})
+		}
+	}
+
 	for {
 		tt := tkn.Next()
 		switch {
 		case tt == xhtml.ErrorToken:
-			return staticUrlList
+			return discovered
 		case tt == xhtml.StartTagToken:
 			t := tkn.Token()
 			tag = strings.ToLower(t.Data)
@@ -217,13 +246,14 @@ func ParseHtml(htmlStr, currentUrl string) []string {
 			if tag == "script" {
 				inScript = true
 				scriptContent.Reset()
-				// 同时解析 script 标签的 src 属性
-				staticUrlList = append(staticUrlList, getUrlByTag(t, currentUrl)...)
+				// 解析 script 标签的 src 等属性
+				appendURLs(getUrlByTag(t, currentUrl), "html_attr")
+				continue
 			}
 
-			// 解析需要提取 URL 的标签
+			// 解析需要提取 URL 的标签属性
 			if urlTags[tag] {
-				staticUrlList = append(staticUrlList, getUrlByTag(t, currentUrl)...)
+				appendURLs(getUrlByTag(t, currentUrl), "html_attr")
 			}
 
 			// 解析所有标签的 data-* 属性 (可能包含 URL)
@@ -231,7 +261,7 @@ func ParseHtml(htmlStr, currentUrl string) []string {
 				key := strings.ToLower(a.Key)
 				if strings.HasPrefix(key, "data-") && urlAttributes[key] {
 					if resolved := HandlerUrl(a.Val, currentUrl); resolved != "" {
-						staticUrlList = append(staticUrlList, resolved)
+						appendURLs([]string{resolved}, "html_attr")
 					}
 				}
 			}
@@ -242,7 +272,7 @@ func ParseHtml(htmlStr, currentUrl string) []string {
 				// 解析内联 script 内容中的 URL
 				content := scriptContent.String()
 				if content != "" {
-					staticUrlList = append(staticUrlList, HandlerUrls(parseJs(content), currentUrl)...)
+					appendURLs(HandlerUrls(parseJs(content), currentUrl), "js_inline")
 				}
 				inScript = false
 				scriptContent.Reset()
@@ -254,22 +284,33 @@ func ParseHtml(htmlStr, currentUrl string) []string {
 				// 收集 script 内容
 				scriptContent.WriteString(text.Data)
 			} else {
-				// 解析普通文本中的 URL
-				staticUrlList = append(staticUrlList, HandlerUrls(findUrlMatch(text.String()), currentUrl)...)
+				appendURLs(HandlerUrls(findUrlMatch(text.String()), currentUrl), "html_text")
 			}
 
 		case tt == xhtml.CommentToken:
 			comment := tkn.Token()
-			staticUrlList = append(staticUrlList, HandlerUrls(findUrlMatch(comment.String()), currentUrl)...)
+			appendURLs(HandlerUrls(findUrlMatch(comment.String()), currentUrl), "html_comment")
 
 		case tt == xhtml.SelfClosingTagToken:
 			t := tkn.Token()
 			tag = strings.ToLower(t.Data)
 			if urlTags[tag] {
-				staticUrlList = append(staticUrlList, getUrlByTag(t, currentUrl)...)
+				appendURLs(getUrlByTag(t, currentUrl), "html_attr")
 			}
 		}
 	}
+}
+
+func ParseHtml(htmlStr, currentUrl string) []string {
+	list := ParseHtmlWithSource(htmlStr, currentUrl)
+	urls := make([]string, 0, len(list))
+	for _, item := range list {
+		if item.URL == "" {
+			continue
+		}
+		urls = append(urls, item.URL)
+	}
+	return urls
 }
 
 func parseJs(content string) []string {
@@ -315,9 +356,13 @@ func HandlerUrl(urlStr, currentUrl string) string {
 func HandlerUrls(urls []string, currentUrl string) []string {
 	result := []string{}
 	for _, url := range urls {
-		log.Logger.Debugf("HandlerUrl before%s", url)
+		if log.Logger != nil {
+			log.Logger.Debugf("HandlerUrl before%s", url)
+		}
 		newUrl := HandlerUrl(url, currentUrl)
-		log.Logger.Debugf("HandlerUrl after%s", newUrl)
+		if log.Logger != nil {
+			log.Logger.Debugf("HandlerUrl after%s", newUrl)
+		}
 		if newUrl != "" && !utils.Contains(result, newUrl) {
 			result = append(result, newUrl)
 		}
@@ -326,29 +371,55 @@ func HandlerUrls(urls []string, currentUrl string) []string {
 }
 
 func ParseDom(page *rod.Page) []string {
+	list := ParseDomWithSource(page)
+	urls := make([]string, 0, len(list))
+	for _, item := range list {
+		if item.URL == "" {
+			continue
+		}
+		urls = append(urls, item.URL)
+	}
+	return urls
+}
+
+// ParseDomWithSource 与 ParseDom 类似，但返回带来源类型的 URL 列表。
+func ParseDomWithSource(page *rod.Page) []DiscoveredURL {
 	target, err := utils.GetCurrentUrlByPage(page)
 	if err != nil {
-		log.Logger.Warnf("ParseDom: failed to get current URL: %v", err)
+		if log.Logger != nil {
+			log.Logger.Warnf("ParseDom: failed to get current URL: %v", err)
+		}
 		return nil
 	}
-	log.Logger.Debugf("parse dom %s", target)
+	if log.Logger != nil {
+		log.Logger.Debugf("parse dom %s", target)
+	}
 	// 获取所有html
 	htmlStr, err := page.HTML()
 	if err != nil {
-		log.Logger.Errorf("ParseDom error: %s", err)
+		if log.Logger != nil {
+			log.Logger.Errorf("ParseDom error: %s", err)
+		}
 		return nil
 	}
 	if htmlStr == "" {
-		log.Logger.Warnf("ParseDom: empty HTML for %s", target)
+		if log.Logger != nil {
+			log.Logger.Warnf("ParseDom: empty HTML for %s", target)
+		}
 		return nil
 	}
 
 	// 解析常规 URL
-	urls := ParseHtml(htmlStr, target)
+	discovered := ParseHtmlWithSource(htmlStr, target)
 
 	// 解析表单并生成 URL
 	formURLs := ExtractFormURLs(htmlStr, target)
-	urls = append(urls, formURLs...)
+	for _, u := range formURLs {
+		if u == "" {
+			continue
+		}
+		discovered = append(discovered, DiscoveredURL{URL: u, SourceType: "html_form"})
+	}
 
-	return urls
+	return discovered
 }

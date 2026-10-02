@@ -171,3 +171,40 @@ func TestDeepScanIsWiredIn(t *testing.T) {
 		t.Errorf("auto.go 应调用 submitFormsJS（POST 类入口必须真正提交表单才能被发现）")
 	}
 }
+
+// 回归测试：SVG 等非 HTMLElement 没有 click() 方法（rod 探针实测
+// svg.click 抛 "is not a function"），点击必须兜底派发 MouseEvent。
+func TestClickFallsBackToDispatchEventForSvg(t *testing.T) {
+	if !strings.Contains(clickBySigJS, `typeof el.click === "function"`) {
+		t.Errorf("clickBySigJS 缺少 click 存在性判断，SVG 元素会点击失败")
+	}
+	if !strings.Contains(clickBySigJS, `dispatchEvent(new MouseEvent("click"`) {
+		t.Errorf("clickBySigJS 缺少 MouseEvent 兜底派发")
+	}
+}
+
+// 回归测试：select 逐项派发 change 后必须立即收集链接增量。
+// 站点惯用法是 change 时清空容器再放新链接，全部派发完再收集只剩最后一项
+// （实测 3 个 option 只收到最后 1 个）。
+func TestDispatchEventsHarvestsAfterEachEvent(t *testing.T) {
+	if !strings.Contains(dispatchEventsJS, "function harvest()") {
+		t.Errorf("dispatchEventsJS 缺少逐次收集函数 harvest")
+	}
+	// select 循环里每个 option 派发后都要 harvest
+	selectLoop := dispatchEventsJS[strings.Index(dispatchEventsJS, "document.querySelectorAll(\"select\")"):]
+	if !strings.Contains(selectLoop, "harvest();") {
+		t.Errorf("select 派发循环内未逐项收集链接")
+	}
+}
+
+// 回归测试：autoFill 必须勾选 checkbox/radio。
+// 「先勾选再点按钮」的流程在按钮点击时读 checked 状态，
+// 勾选逻辑放在提交表单阶段太晚（实测 checkbox-bundle 缺失）。
+func TestAutoFillChecksCheckboxAndRadio(t *testing.T) {
+	if !strings.Contains(autoFillJS, `t === "checkbox" || t === "radio"`) {
+		t.Errorf("autoFillJS 未处理 checkbox/radio 勾选")
+	}
+	if !strings.Contains(autoFillJS, `node.checked = true`) {
+		t.Errorf("autoFillJS 未设置 checked")
+	}
+}

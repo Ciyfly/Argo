@@ -35,4 +35,4 @@ jobs:
           binary_name: "argo"
           project_path: "./cmd/"
           ldflags: "-X main.Version=${{ env.RELEASE_TAG }}"
-          asset_name: '${{ env.REPOSITORY_NAME }}-${{ env.RELEASE_TAG }}-${{ env.OS_NAME }}-${{ matrix.goarch }}'
+          asset_name: "${{ env.REPOSITORY_NAME }}-${{ env.RELEASE_TAG }}-${{ env.OS_NAME }}-${{ matrix.goarch }}"

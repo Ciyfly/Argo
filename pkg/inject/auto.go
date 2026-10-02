@@ -5,7 +5,9 @@ import (
 	"argo/pkg/log"
 	"argo/pkg/static"
 	"argo/pkg/utils"
+	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -18,12 +20,51 @@ import (
 // 以及用 ARIA role 标成按钮/标签页/菜单项的容器——SPA 里大量入口是这些。
 const autoClickableSelector = "a[href^='javascript'], button, input[type=button], input[type=submit], select, [onclick], svg, [role=button], [role=tab], [role=menuitem], summary"
 
-// autoFillJS 给页面上的输入框填默认账号。
+// formFieldMatcherSrc 是表单字段匹配的公共 JS 片段（函数定义），拼进各填充函数体内。
+//
+// 填充优先级：skip 规则 > 用户 rules（正则对 name/id/placeholder/aria-label）> 内置语义 > 调用方默认值。
+// 验证码类字段默认 skip——爬虫不该猜验证码，填假值反而会把表单卡在校验失败。
+const formFieldMatcherSrc = `
+	function fieldKey(node) {
+		const parts = [node.name, node.id, node.getAttribute && node.getAttribute("placeholder"),
+			node.getAttribute && node.getAttribute("aria-label")];
+		return parts.filter(Boolean).join(" ").toLowerCase();
+	}
+	function regexTest(pattern, s) {
+		try { return new RegExp(pattern).test(s); } catch (e) { return s.indexOf(pattern) >= 0; }
+	}
+	function formSkipped(node, skipRes) {
+		const k = fieldKey(node);
+		return skipRes.some(function (r) { return regexTest(r, k); });
+	}
+	function formRuleValue(node, rules) {
+		const k = fieldKey(node);
+		for (let i = 0; i < rules.length; i++) {
+			if (regexTest(rules[i].match, k)) { return rules[i].value; }
+		}
+		return null;
+	}
+	function semanticValue(node, defaults) {
+		const t = (node.type || "text").toLowerCase();
+		const k = fieldKey(node);
+		if (t === "search" || /search|搜索|查询/.test(k)) { return defaults.search; }
+		if (t === "email" || /mail|邮箱/.test(k)) { return defaults.email; }
+		if (t === "tel" || /phone|手机|电话/.test(k)) { return defaults.phone; }
+		if (t === "url") { return "https://example.com"; }
+		if (t === "number" || t === "range") { return "20"; }
+		if (t === "date") { return "2020-01-01"; }
+		if (t === "password") { return defaults.password; }
+		if (t === "text" || t === "") { return defaults.username; }
+		return null;
+	}
+`
+
+// autoFillJS 给页面上的输入框按字段级规则填充。
 //
 // 必须走原生 value setter 并派发 input/change：
 // 直接写 textContent/nodeValue 对 input 无效，
 // 而 React/Vue 这类框架靠覆写 value setter 感知输入。
-var autoFillJS = `(username, password, email, phone) => {
+var autoFillJS = `(username, password, email, phone, rulesJson) => {` + formFieldMatcherSrc + `
 	function setValue(node, value) {
 		const proto = node.tagName === "TEXTAREA" ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
 		const descriptor = Object.getOwnPropertyDescriptor(proto, "value");
@@ -35,12 +76,27 @@ var autoFillJS = `(username, password, email, phone) => {
 		node.dispatchEvent(new Event("input", {bubbles: true}));
 		node.dispatchEvent(new Event("change", {bubbles: true}));
 	}
+	let conf = {};
+	try { conf = JSON.parse(rulesJson || "{}") || {}; } catch (e) {}
+	const userRules = conf.rules || [];
+	const skipRes = conf.skip || [];
+	const defaults = {username: username, password: password, email: email, phone: phone, search: "argo"};
 	document.querySelectorAll("input, textarea").forEach(function (node) {
 		const t = (node.type || "text").toLowerCase();
-		if (t === "text") { setValue(node, username); }
-		else if (t === "password") { setValue(node, password); }
-		else if (t === "email") { setValue(node, email); }
-		else if (t === "tel") { setValue(node, phone); }
+		if (t === "checkbox" || t === "radio") {
+			// checkbox/radio 必须在交互点击前勾上：
+			// 「先勾选再点提交类按钮」的流程，按钮点击时读的是 checked 状态
+			if (!node.checked) {
+				node.checked = true;
+				node.dispatchEvent(new Event("input", {bubbles: true}));
+				node.dispatchEvent(new Event("change", {bubbles: true}));
+			}
+			return;
+		}
+		if (node.value && node.value.length > 0) { return; }
+		if (formSkipped(node, skipRes)) { return; }
+		const value = formRuleValue(node, userRules) || semanticValue(node, defaults);
+		if (value !== null) { setValue(node, value); }
 	});
 	return true;
 }`
@@ -120,17 +176,23 @@ var scanLinksDeepJS = `() => {
 	return out;
 }`
 
-var submitFormsJS = `(username, password, email, phone) => {
+var submitFormsJS = `(username, password, email, phone, rulesJson) => {` + formFieldMatcherSrc + `
 	const done = [];
+	let conf = {};
+	try { conf = JSON.parse(rulesJson || "{}") || {}; } catch (e) {}
+	const userRules = conf.rules || [];
+	const skipRes = conf.skip || [];
+	const defaults = {username: username, password: password, email: email, phone: phone, search: "argo"};
 	function fill(el) {
-		const type = (el.type || "text").toLowerCase();
 		if (el.value && el.value.length > 0) { return; }
-		if (type === "email") { el.value = email; }
-		else if (type === "password") { el.value = password; }
-		else if (type === "tel") { el.value = phone; }
-		else if (type === "number") { el.value = "20"; }
-		else if (type === "text" || type === "search" || type === "url") { el.value = username; }
-		else if (type === "checkbox" || type === "radio") { el.checked = true; }
+		if (el.tagName !== "SELECT" && formSkipped(el, skipRes)) { return; }
+		const ruleVal = formRuleValue(el, userRules);
+		if (ruleVal !== null) { el.value = ruleVal; }
+		else {
+			const v = semanticValue(el, defaults);
+			if (v === null) { return; }
+			el.value = v;
+		}
 		try {
 			el.dispatchEvent(new Event("input", {bubbles: true}));
 			el.dispatchEvent(new Event("change", {bubbles: true}));
@@ -165,6 +227,30 @@ var submitFormsJS = `(username, password, email, phone) => {
 	});
 	return done;
 }`
+
+// formRulesJSON 把配置里的填充规则序列化成 JS 侧参数，并校验正则合法性。
+// 正则非法返回错误，由调用方在启动时 Fatal——用户第一时间知道哪条规则写错。
+func formRulesJSON(cfg conf.FormConf) (string, error) {
+	payload := struct {
+		Rules []conf.FormFillRule `json:"rules"`
+		Skip  []string            `json:"skip"`
+	}{Rules: cfg.Rules, Skip: cfg.Skip}
+	for i, rule := range payload.Rules {
+		if _, err := regexp.Compile(rule.Match); err != nil {
+			return "", fmt.Errorf("form.rules[%d] match %q: %s", i, rule.Match, err)
+		}
+	}
+	for i, pattern := range payload.Skip {
+		if _, err := regexp.Compile(pattern); err != nil {
+			return "", fmt.Errorf("form.skip[%d] %q: %s", i, pattern, err)
+		}
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
 
 // listClickableJS 列出可点击元素，附带稳定签名与是否应跳过。
 //
@@ -234,19 +320,41 @@ var clickBySigJS = fmt.Sprintf(`(targetSig) => {
 		el.setAttribute("type", "button");
 	}
 	try { el.scrollIntoView({ block: "center" }); } catch (e) {}
-	try { el.click(); } catch (e) { return false; }
+	// click() 是 HTMLElement 的方法，SVG / 自定义元素上不存在
+	//（rod 探针实测 svg.click 抛 "is not a function"），统一兜底派发 MouseEvent
+	try {
+		if (typeof el.click === "function") { el.click(); }
+		else { el.dispatchEvent(new MouseEvent("click", {bubbles: true, cancelable: true, view: window})); }
+	} catch (e) { return false; }
 	return true;
 }`, fmt.Sprintf("%q", autoClickableSelector))
 
 // dispatchEventsJS 向页面派发非 click 的交互事件。
 //
 // 很多入口挂在 contextmenu / dblclick / change / keydown 上，
-// 只发 click 永远触发不到它们。select 变更会把目标 URL 写进 value，
-// 所以这里一并把 value 收回来当链接用。
+// 只发 click 永远触发不到它们。
+//
+// 关键点：每派发一个事件就立即收集一次文档里的 a[href] 增量。
+// 站点惯用法是「change/右键时清空容器再放新链接」——
+// 全部派发完再收集的话，容器里只剩最后一个事件产生的链接，
+// 之前的全部丢失（实测 3 个 select option 只能收到最后 1 个）。
 var dispatchEventsJS = `(shortcutKey) => {
 	const found = [];
+	const seen = new Set();
 	function safe(fn) { try { fn(); } catch (e) {} }
-	function push(v) { if (v && String(v).indexOf("http") === 0) { found.push(String(v)); } }
+	function push(v) {
+		if (!v) { return; }
+		const s = String(v).trim();
+		if (!s || seen.has(s)) { return; }
+		try {
+			const abs = new URL(s, document.baseURI).href;
+			if (abs.indexOf("http") === 0 && !seen.has(abs)) { seen.add(abs); found.push(abs); }
+		} catch (e) {}
+	}
+	// 收集当前文档全部链接（相对路径解析为绝对地址）
+	function harvest() {
+		document.querySelectorAll("a[href]").forEach(function (a) { push(a.getAttribute("href")); });
+	}
 
 	// 右键菜单：常见于弹出隐藏操作入口
 	safe(function () {
@@ -254,6 +362,7 @@ var dispatchEventsJS = `(shortcutKey) => {
 			safe(function () {
 				el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, view: window }));
 			});
+			harvest();
 		});
 	});
 
@@ -263,11 +372,12 @@ var dispatchEventsJS = `(shortcutKey) => {
 			safe(function () {
 				el.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true, view: window }));
 			});
+			harvest();
 		});
 	});
 
-	// 下拉框：选中每一项并派发 change/input，
-	// 有些实现把跳转地址直接写在 option.value 里
+	// 下拉框：选中每一项、派发 change 后立即收集——
+	// handler 常在 change 里清空容器再放新链接，逐项收集才能全拿到
 	safe(function () {
 		document.querySelectorAll("select").forEach(function (sel) {
 			for (let i = 0; i < sel.options.length; i++) {
@@ -276,6 +386,7 @@ var dispatchEventsJS = `(shortcutKey) => {
 					sel.dispatchEvent(new Event("input", { bubbles: true }));
 					sel.dispatchEvent(new Event("change", { bubbles: true }));
 				});
+				harvest();
 				push(sel.value);
 				push(sel.options[i] && sel.options[i].value);
 			}
@@ -295,6 +406,7 @@ var dispatchEventsJS = `(shortcutKey) => {
 		});
 		document.dispatchEvent(ev);
 		window.dispatchEvent(ev);
+		harvest();
 	});
 
 	return found;
@@ -384,14 +496,52 @@ func settleAfterClick(page *rod.Page, maxWait time.Duration) bool {
 	return false
 }
 
+// interactionBudgetCap 单页交互预算上限。
+//
+// 预算公式里的 browserTimeout/4 项在默认 browserTimeout=900 下高达 225s，
+// 会让挂起页面把外层强杀拖到 235s（历史行为是 tabTimeout=15s 就杀），
+// 默认口径下整个任务被单个坏页面拖死。交互超过 60s 还没有产出，
+// 继续等的收益趋近于零，直接封顶。
+const interactionBudgetCap = 60 * time.Second
+
+// InteractionBudget 返回单页交互的时间预算。
+//
+// 外层 tab 的强杀超时必须与这里用同一个值（见 tab.go NewTab）：
+// 历史上外层只等 tabTimeout（15s），而交互内部预算是 max(tabTimeout, browserTimeout/4)（35s），
+// 两个时钟不一致导致交互跑一半页面就被杀——元素多的首页后半部分按钮
+// （购物车/确认门/多级菜单）全部没轮到，却表现为「交互能力缺失」。
+func InteractionBudget() time.Duration {
+	budget := time.Duration(conf.GlobalConfig.BrowserConf.TabTimeout) * time.Second
+	globalShare := time.Duration(conf.GlobalConfig.BrowserConf.BrowserTimeout) * time.Second / 4
+	if globalShare > budget {
+		budget = globalShare
+	}
+	if budget < 12*time.Second {
+		budget = 12 * time.Second
+	}
+	if budget > interactionBudgetCap {
+		budget = interactionBudgetCap
+	}
+	return budget
+}
+
 // Auto 在页面上做自动化交互，返回发现的 URL。
+//
+// reportProgress 可为 nil；不为 nil 时在页面产生进展（新链接/DOM 变化）时被调用，
+// 供外层做「进度驱动」的 idle 超时判断——有进展的页面不该被固定时钟杀掉
+// （katana 的 heuristic 策略同理：等静默信号而不是固定寿命）。
 //
 // 采用「Go 驱动」而不是把整套流程写进一个 JS 函数：
 // 点击可能触发页面导航，一旦导航发生，浏览器里的 JS 执行上下文立刻失效，
 // 把所有点击和等待塞在一个 JS 里必然中途崩掉（历史实现正是如此，
 // 且收集完静态链接就 return，点击新产生的链接从未被读取）。
 // 所以这里 JS 只做单步动作，循环、重扫、导航恢复都由 Go 侧控制。
-func Auto(page *rod.Page) []string {
+func Auto(page *rod.Page, reportProgress func()) []string {
+	ping := func() {
+		if reportProgress != nil {
+			reportProgress()
+		}
+	}
 	info, err := utils.GetPageInfoByPage(page)
 	if err != nil {
 		return nil
@@ -400,6 +550,12 @@ func Auto(page *rod.Page) []string {
 	log.Logger.Debugf("run auto js %s", startURL)
 
 	cfg := conf.GlobalConfig
+	// 规则正则在 engine 启动时已校验过；这里再失败只降级为空规则并记日志，不中断爬取
+	formRules, err := formRulesJSON(cfg.FormConf)
+	if err != nil {
+		log.Logger.Errorf("form fill rules invalid, fallback to defaults: %s", err)
+		formRules = "{}"
+	}
 	// maxSettle 是单个元素等页面反应的上限。
 	// 默认取 Slow，但设上限避免个别元素把预算吃干。
 	maxSettle := time.Duration(cfg.AutoConf.Slow) * time.Millisecond
@@ -424,14 +580,7 @@ func Auto(page *rod.Page) []string {
 	// 且任务总时长会撞上 browserTimeout 被硬切
 	// （实测产生 200 条与 80 条的双峰波动，shop/pagination 大量丢失）。
 	// 所以给一个居中的上限：全局预算的四分之一。
-	budget := time.Duration(cfg.BrowserConf.TabTimeout) * time.Second
-	globalShare := time.Duration(cfg.BrowserConf.BrowserTimeout) * time.Second / 4
-	if globalShare > budget {
-		budget = globalShare
-	}
-	if budget < 12*time.Second {
-		budget = 12 * time.Second
-	}
+	budget := InteractionBudget()
 	deadline := time.Now().Add(budget)
 
 	hrefList := []string{}
@@ -448,6 +597,7 @@ func Auto(page *rod.Page) []string {
 			}
 			seen[h] = true
 			hrefList = append(hrefList, h)
+			ping()
 		}
 	}
 
@@ -463,13 +613,14 @@ func Auto(page *rod.Page) []string {
 			}
 			seen[h] = true
 			hrefList = append(hrefList, h)
+			ping()
 		}
 	}
 
 	// 1. 先填表单，让需要登录的页面进入登录态
 	if _, err := page.Eval(autoFillJS,
 		cfg.LoginConf.Username, cfg.LoginConf.Password,
-		cfg.LoginConf.Email, cfg.LoginConf.Phone); err != nil {
+		cfg.LoginConf.Email, cfg.LoginConf.Phone, formRules); err != nil {
 		log.Logger.Debugf("auto fill err: %s", err)
 	}
 
@@ -479,6 +630,28 @@ func Auto(page *rod.Page) []string {
 
 	// 3. 记录基线链接
 	collect()
+
+	// 3b. 先派发非 click 事件（右键/双击/select 遍历/快捷键）。
+	//
+	// 放在点击循环之前而不是收尾：这些派发很便宜（几次 dispatch + 收集），
+	// 而点击循环可能耗尽预算——放在最后的话，预算一紧整组事件全部跳过
+	// （实测 tabtimeout 紧的 run 里 ctx/dblclick/select/shortcut 全缺）。
+	// select 的 value 与派发产生的新链接在这里一并收集。
+	if res, err := page.Eval(dispatchEventsJS, cfg.AutoConf.ShortcutKey); err == nil {
+		for _, v := range res.Value.Arr() {
+			h := v.Str()
+			if h != "" && !seen[h] {
+				seen[h] = true
+				hrefList = append(hrefList, h)
+				ping()
+			}
+		}
+	}
+	settleAfterClick(page, 1200*time.Millisecond)
+	collect()
+	if navigatedAway(currentURL(page), startURL) {
+		backToStart(page, startURL)
+	}
 
 	// 4. 逐个点击，每次点完重新扫描
 	//
@@ -627,29 +800,7 @@ func Auto(page *rod.Page) []string {
 			}
 		}
 	}
-	// 5. 派发非 click 事件（右键/双击/select/快捷键）。
-	//
-	// 这些入口大多触发 XHR 而不是 DOM 链接，但请求会被流量劫持捕获；
-	// select 的 value 里则可能直接写着目标地址，单独收回来。
-	if time.Now().Before(deadline) {
-		if res, err := page.Eval(dispatchEventsJS, cfg.AutoConf.ShortcutKey); err == nil {
-			for _, v := range res.Value.Arr() {
-				h := v.Str()
-				if h != "" && !seen[h] {
-					seen[h] = true
-					hrefList = append(hrefList, h)
-				}
-			}
-		}
-		maxSettle = 1200 * time.Millisecond
-		settleAfterClick(page, maxSettle)
-		collect()
-		if navigatedAway(currentURL(page), startURL) {
-			backToStart(page, startURL)
-		}
-	}
-
-	// 提交表单。
+	// 5. 表单提交。
 	//
 	// 只读 <form action> 拿不到真实方法与参数；
 	// 表单类入口（反馈/订阅/上传/严格校验）要求的就是 POST 请求，
@@ -660,7 +811,7 @@ func Auto(page *rod.Page) []string {
 	if _, err := page.Eval(armMutationJS); err == nil {
 		if _, err := page.Eval(submitFormsJS,
 			cfg.LoginConf.Username, cfg.LoginConf.Password,
-			cfg.LoginConf.Email, cfg.LoginConf.Phone); err != nil {
+			cfg.LoginConf.Email, cfg.LoginConf.Phone, formRules); err != nil {
 			log.Logger.Debugf("auto submit forms err: %s", err)
 		}
 		_ = settleAfterClick(page, 600*time.Millisecond)

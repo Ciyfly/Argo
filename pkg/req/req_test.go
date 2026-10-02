@@ -49,3 +49,73 @@ func TestGetResponseWithBody(t *testing.T) {
 		t.Errorf("非 200 响应应当返回 nil，实际拿到 status=%d", resp.StatusCode)
 	}
 }
+
+// 回归测试：DoWithRetry 在服务器暂时失败后重试应当最终成功，
+// retries=0 时保持原有单次行为。
+func TestDoWithRetry(t *testing.T) {
+	failCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 前两次连接级别的失败用直接关闭连接模拟
+		if r.URL.Path == "/flaky" && failCount < 2 {
+			failCount++
+			panic(http.ErrAbortHandler)
+		}
+		w.WriteHeader(http.StatusOK)
+		io.WriteString(w, "ok")
+	}))
+	defer server.Close()
+
+	conf.GlobalConfig = &conf.Conf{}
+	log.Init(false, false)
+
+	request, _ := http.NewRequest("GET", server.URL+"/flaky", nil)
+
+	// retries=2：两次失败后第三次成功
+	resp, err := DoWithRetry(http.DefaultClient, request, 2)
+	if err != nil {
+		t.Fatalf("retries=2 时应当重试成功，实际 err: %s", err)
+	}
+	resp.Body.Close()
+
+	// 失败计数重置后再验证 retries=0 不重试
+	failCount = 0
+	request2, _ := http.NewRequest("GET", server.URL+"/flaky", nil)
+	_, err = DoWithRetry(http.DefaultClient, request2, 0)
+	if err == nil {
+		t.Errorf("retries=0 时首次失败应当直接返回错误，不应重试")
+	}
+}
+
+// 回归测试：内容类型探测按响应区分 html/json，失败时 Ok=false 供调用方回退。
+func TestProbeContentType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/page":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+		case "/api/data":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+		case "/noct":
+			// 无 Content-Type
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer server.Close()
+
+	conf.GlobalConfig = &conf.Conf{}
+	log.Init(false, false)
+
+	if got := ProbeContentType(server.URL + "/page"); !got.Ok || !IsHTMLContentType(got.ContentType) {
+		t.Errorf("html 响应应判定为 HTML: %+v", got)
+	}
+	if got := ProbeContentType(server.URL + "/api/data"); !got.Ok || IsHTMLContentType(got.ContentType) {
+		t.Errorf("json 响应不应判定为 HTML: %+v", got)
+	}
+	if got := ProbeContentType(server.URL + "/noct"); !got.Ok || got.ContentType != "" {
+		t.Errorf("无 Content-Type 响应应返回空类型: %+v", got)
+	}
+	if got := ProbeContentType("http://127.0.0.1:1/unreachable"); got.Ok {
+		t.Errorf("不可达目标应返回 Ok=false: %+v", got)
+	}
+}

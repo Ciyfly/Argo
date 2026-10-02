@@ -2,14 +2,22 @@ package engine
 
 import (
 	"argo/pkg/conf"
+	"argo/pkg/extract"
 	"argo/pkg/inject"
 	"argo/pkg/log"
 	"argo/pkg/login"
 	"argo/pkg/playback"
+	"argo/pkg/ratelimit"
+	"argo/pkg/req"
+	"argo/pkg/scope"
 	"argo/pkg/static"
 	"argo/pkg/utils"
 	"argo/pkg/vector"
+	"bufio"
 	"context"
+	"net/http"
+	urlpkg "net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -54,7 +62,7 @@ func (ei *EngineInfo) TimeoutCloseTab(page *rod.Page, pageFlag int, tabDone chan
 //
 // 历史实现每页固定耗 4 秒以上：WaitRequestIdle(2s) + WaitDOMStable(2s)
 // 是「最多等 2 秒」而不是「等满 2 秒」，但随后还有一个 JS 检查循环
-//（最多 5 次 × 1 秒 sleep），即使页面 0.3 秒就绪也要等 4~5 秒。
+// （最多 5 次 × 1 秒 sleep），即使页面 0.3 秒就绪也要等 4~5 秒。
 // 90 个页面就是 400 秒的纯等待，是整体耗时的大头。
 //
 // 现在改为事件驱动：readyState 一到 interactive/complete 立即返回；
@@ -115,6 +123,9 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 	if TabLimitCloseFlag {
 		return
 	}
+	// 单页进度跟踪：驱动 idle 超时（页面有进展就不杀），代替固定 tab 超时
+	tabProgress := &tabProgressTracker{}
+	tabProgress.Mark()
 	var PushUrlWg sync.WaitGroup
 	// 入队函数：优先走 tabPool（并发 100），池关闭/异常时同步直推。
 	//
@@ -131,6 +142,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 		PushUrlWg.Done()
 	})
 	pushURL = func(uif *UrlInfo) bool {
+		tabProgress.Mark()
 		if tabPool != nil {
 			if err := tabPool.Invoke(uif); err == nil {
 				return true
@@ -194,6 +206,11 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 			return
 		}
 		if pageFlag == HOME_PAGE_FLAG {
+			// 人工登录模式：首页加载后暂停，等人完成登录（验证码/短信/扫码）
+			// 后回终端按回车。等待期间持续保活进度，防止 idle/超时误杀首页。
+			if conf.GlobalConfig.BrowserConf.WaitLogin {
+				waitManualLogin(tabProgress)
+			}
 			//  执行headless脚本 只有访问第一个页面的时候才会执行
 			if conf.GlobalConfig.PlaybackPath != "" {
 				log.Logger.Debugf("run playback script: %s", conf.GlobalConfig.PlaybackPath)
@@ -220,11 +237,12 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 			for _, staticUrl := range staticUrlList {
 				PushUrlWg.Add(1)
 				data := &UrlInfo{Url: staticUrl, SourceType: "static parse", SourceUrl: uif.Url, Depth: uif.Depth + 1}
+				tabProgress.Mark()
 				_ = tabPool.Invoke(data)
 			}
 		}
 		// 执行自动化触发事件 输入 点击等 auto
-		hrefList := inject.Auto(page)
+		hrefList := inject.Auto(page, tabProgress.Mark)
 
 		// auto 触发后 获取下当前url
 		//
@@ -274,7 +292,31 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 		return
 	}
 
-	// DOM加载完成后，使用配置的TabTimeout进行后续操作的超时控制
+	// DOM加载完成后，等待页面处理完成。
+	//
+	// 超时是双层的，都不再用固定的 tabTimeout 杀交互中的页面：
+	//  1. idle 超时：页面静默超过 tab_idle 秒（无新链接/无进展）就杀——
+	//     挂起页面快速回收，快页面不受影响；
+	//  2. 硬上限：inject.InteractionBudget() + 10s，防进度信号异常时的兜底。
+	idleKill := make(chan struct{})
+	go func() {
+		idle := time.Duration(conf.GlobalConfig.AutoConf.TabIdle) * time.Second
+		if idle <= 0 {
+			idle = 10 * time.Second
+		}
+		for {
+			select {
+			case <-tabDone:
+				return
+			default:
+			}
+			time.Sleep(1 * time.Second)
+			if tabProgress.IdleFor() > idle {
+				close(idleKill)
+				return
+			}
+		}
+	}()
 	select {
 	case <-tabDone:
 		log.Logger.Debugf("[close tab ] => %s", uif.Url)
@@ -282,13 +324,67 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 		if !TimeoutDoneFlag {
 			ei.NormalCloseTab(page, pageFlag, tabDone)
 		}
-	case <-time.After(time.Duration(conf.GlobalConfig.BrowserConf.TabTimeout) * time.Second):
+	case <-idleKill:
+		log.Logger.Warnf("[idle tab    ] => %s", uif.Url)
+		if !NormalDoneFlag {
+			TimeoutDoneFlag = true
+			ei.TimeoutCloseTab(page, pageFlag, tabDone)
+		}
+	case <-time.After(inject.InteractionBudget() + 10*time.Second):
 		log.Logger.Warnf("[timeout tab ] => %s", uif.Url)
 		if !NormalDoneFlag {
 			TimeoutDoneFlag = true
 			ei.TimeoutCloseTab(page, pageFlag, tabDone)
 		}
 	}
+}
+
+// waitManualLogin 阻塞等待人工在浏览器里完成登录，终端回车后返回。
+//
+// stdin 不是终端（管道/CI）时跳过等待——否则无人值守场景会永久挂死；
+// 等待期间每秒 Mark 一次进度，首页不会被 idle 超时杀掉。
+func waitManualLogin(tabProgress *tabProgressTracker) {
+	if !stdinIsTerminal() {
+		log.Logger.Warn("[wait-login] stdin 非终端（管道/CI？），跳过人工登录等待，回退自动登录")
+		return
+	}
+	log.Logger.Warn("[wait-login] 请在浏览器中完成登录（验证码/短信均可），然后回到终端按回车继续爬取...")
+	enterPressed := make(chan struct{})
+	go func() {
+		defer close(enterPressed)
+		reader := bufio.NewReader(os.Stdin)
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				return // EOF 等：不再等待
+			}
+			if strings.TrimSpace(line) == "" {
+				return
+			}
+			// 输入了非空内容（可能是误触）：继续等下一次回车
+		}
+	}()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-enterPressed:
+			tabProgress.Mark()
+			log.Logger.Info("[wait-login] 继续爬取")
+			return
+		case <-ticker.C:
+			tabProgress.Mark()
+		}
+	}
+}
+
+// stdinIsTerminal 判断标准输入是否为交互终端。
+func stdinIsTerminal() bool {
+	info, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
 }
 
 // 接收所有静态url 来处理
@@ -301,6 +397,8 @@ func (ei *EngineInfo) InitTabPool(ctx context.Context) {
 	UrlsQueue = make(chan *UrlInfo, 10000)
 	TabQueue = make(chan *UrlInfo, conf.GlobalConfig.BrowserConf.TabCount)
 	TabLimit = make(chan int, conf.GlobalConfig.BrowserConf.TabCount)
+	// 导航限速器（rate/hostrate 为 0 时完全直通）
+	ratelimit.Init(conf.GlobalConfig.BrowserConf.RateLimit, conf.GlobalConfig.BrowserConf.HostRateLimit)
 	for i := 1; i < conf.GlobalConfig.BrowserConf.TabCount; i++ {
 		go ei.PendUrlWork(ctx)
 	}
@@ -316,6 +414,8 @@ func PushUrlQueue(uif *UrlInfo) {
 	if UrlsQueueCloseFlag {
 		return
 	}
+	// 断点续爬：登记待处理影子集合，PendUrlWork 消费后移除
+	RegisterPendingShadow(uif)
 	UrlsQueue <- uif
 }
 
@@ -339,8 +439,9 @@ func (ei *EngineInfo) TabWork(ctx context.Context) {
 				if !ok {
 					return
 				}
-				// 不包含根url的直接不进行访问
-				if !strings.Contains(uif.Url, ei.Host) {
+				// scope 外的直接不进行访问
+				if !scope.IsInScope(uif.Url) {
+					scope.RecordOutScope(uif.Url)
 					<-TabLimit
 					continue
 				}
@@ -357,6 +458,9 @@ func (ei *EngineInfo) TabWork(ctx context.Context) {
 						TabWg.Done()
 						<-TabLimit
 					}()
+					// 导航限速：只在「我们主动开 tab」这一层节流（0 = 不限速直通）。
+					// 持有 TabLimit 令牌时等待是安全的：并发上限不变，只是推迟放行。
+					ratelimit.WaitNavigation(ctx, uif.Url)
 					log.Logger.Debugf("[ new tab  ]=> %s", uif.Url)
 					// 每个目标开始前清空上一轮的结果，避免多目标时结果串到下一个目标
 					if uif.SourceType == "homePage" {
@@ -387,11 +491,13 @@ func (ei *EngineInfo) PendUrlWork(ctx context.Context) {
 			if !ok {
 				return
 			}
+			ConsumePendingShadow(uif.Url)
 			if uif.Url == "" {
 				continue
 			}
-			// pass 掉host之外的域名
-			if strings.Contains(uif.Url, "http") && !strings.Contains(uif.Url, ei.Host) {
+			// scope 外的 URL 记录后丢弃
+			if strings.Contains(uif.Url, "http") && !scope.IsInScope(uif.Url) {
+				scope.RecordOutScope(uif.Url)
 				continue
 			}
 			if filterStaticPendUrl(uif.Url) {
@@ -400,6 +506,35 @@ func (ei *EngineInfo) PendUrlWork(ctx context.Context) {
 			} // 泛化后不重复才会请求
 
 			if !urlIsExists(uif.Url) {
+				// hybrid 引擎：depth>=1 的文档页走 Go 抓取（fetcher.go），
+				// 首页/空壳页/非文档 URL 照旧浏览器/预检分流
+				if hybridEnabled() && uif.Depth >= 1 && extract.IsDocumentURL(uif.Url) {
+					if FetchDocumentPage(uif) {
+						// 空壳页升级浏览器
+						PushTabQueue(uif)
+					}
+					continue
+				}
+				// 无文档后缀的 URL 先做内容类型预检（Go 侧轻量 GET，不开浏览器）：
+				// json/xml 等接口「发现即结果」直接记录，省下的 tab 预算让给真正的页面；
+				// 是 HTML（SPA 路由等）才进 tab 队列。预检失败保守回退开 tab。
+				if !extract.IsDocumentURL(uif.Url) {
+					probe := req.ProbeContentType(uif.Url)
+					if probe.Ok && probe.ContentType != "" && !req.IsHTMLContentType(probe.ContentType) {
+						pu := &PendingUrl{
+							URL:             uif.Url,
+							Method:          "GET",
+							Headers:         http.Header{},
+							Status:          probe.StatusCode,
+							ResponseHeaders: probe.Headers,
+						}
+						if u, err := urlpkg.Parse(uif.Url); err == nil {
+							pu.Host = u.Host
+						}
+						pushpendingNormalizeQueue(pu)
+						continue
+					}
+				}
 				PushTabQueue(uif)
 			}
 		}

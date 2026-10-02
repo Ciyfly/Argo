@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	cli "github.com/urfave/cli/v2"
 )
@@ -22,13 +23,23 @@ var Version = "v1.0"
 
 // 去除go http.head 请求出现的日志
 
+// SetupCloseHandler 捕获退出信号：尽力保存断点状态再退出（最多等 2s）。
 func SetupCloseHandler() {
 	// 有缓冲的 channel：signal.Notify 在信号到来时不应阻塞，否则会丢信号
 	c := make(chan os.Signal, 1)
-	signal.Notify(c, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, os.Interrupt, os.Kill, syscall.SIGKILL)
+	signal.Notify(c, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, os.Interrupt)
 	go func() {
 		<-c
 		fmt.Println("ctrl+c exit")
+		// 断点状态尽力保存（engine 包注入的回调）
+		if engine.FlushCrawlStateOnExit != nil {
+			done := make(chan struct{})
+			go func() { engine.FlushCrawlStateOnExit(); close(done) }()
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+			}
+		}
 		os.Exit(0)
 	}()
 }
@@ -89,11 +100,65 @@ func main() {
 			Usage:    "The default delay time for operating after enabling ",
 			Category: BrowserArgsGroup,
 		},
+		&cli.IntFlag{
+			Name:     "tabidle",
+			Value:    10,
+			Usage:    "Close a tab after it has been idle (no new links found) for this many seconds. Pages keep making progress stay open longer.",
+			Category: BrowserArgsGroup,
+		},
 		&cli.StringFlag{
 			Name:     "userAgent",
 			Value:    "",
 			Usage:    "User-Agent",
 			Category: BrowserArgsGroup,
+		},
+		&cli.BoolFlag{
+			Name:     "waitlogin",
+			Value:    false,
+			Usage:    "Manual login mode: show the browser, pause after the first page until you press Enter, then keep crawling with your session (works for captcha/SMS login).",
+			Category: BrowserArgsGroup,
+		},
+		&cli.StringFlag{
+			Name:     "pushproxy",
+			Value:    "",
+			Usage:    "Passive scanner address (e.g. xray webscan --listen 127.0.0.1:7777). All traffic is forwarded through it.",
+			Category: UseArgsGroup,
+		},
+		&cli.StringFlag{
+			Name:     "engine",
+			Value:    "headless",
+			Usage:    "Engine mode: headless (all pages in browser, default) or hybrid (HTML pages fetched via HTTP, faster).",
+			Category: ConfigArgsGroup,
+		},
+		&cli.StringFlag{
+			Name:     "fields",
+			Value:    "",
+			Usage:    "Comma-separated result fields for json/quiet output: url,method,host,data,status,request_str,response_body. Empty = all fields.",
+			Category: OutPutArgsGroup,
+		},
+		&cli.StringFlag{
+			Name:     "outputtemplate",
+			Value:    "",
+			Usage:    "Go text/template for txt output lines, e.g. '{{.Method}} {{.Status}} {{.URL}}'. Empty = default [METHOD]URL.",
+			Category: OutPutArgsGroup,
+		},
+		&cli.BoolFlag{
+			Name:     "fuzz",
+			Value:    false,
+			Usage:    "Probe common paths from a built-in dictionary (Go-side HTTP, no browser). Off by default.",
+			Category: UseArgsGroup,
+		},
+		&cli.StringFlag{
+			Name:     "fuzzdict",
+			Value:    "",
+			Usage:    "External path dictionary file (one path per line) for --fuzz. Empty = built-in dictionary.",
+			Category: UseArgsGroup,
+		},
+		&cli.StringFlag{
+			Name:     "resume",
+			Value:    "",
+			Usage:    "Resume a previous crawl from its state file (<outputdir>/<save>.state.json).",
+			Category: UseArgsGroup,
 		},
 		&cli.StringFlag{
 			Name:     "username",
@@ -235,6 +300,58 @@ func main() {
 			Value:    5,
 			Usage:    "Scrape web content with increasing depth by crawling URLs, stop at max depth.",
 			Category: ConfigArgsGroup,
+		},
+		&cli.IntFlag{
+			Name:     "rate",
+			Value:    0,
+			Usage:    "Max page navigations per second, 0 means no limit.",
+			Category: ConfigArgsGroup,
+		},
+		&cli.IntFlag{
+			Name:     "hostrate",
+			Value:    0,
+			Usage:    "Max page navigations per second per host, 0 means no limit.",
+			Category: ConfigArgsGroup,
+		},
+		&cli.IntFlag{
+			Name:     "retry",
+			Value:    0,
+			Usage:    "Retries for failed static/hijacked requests.",
+			Category: ConfigArgsGroup,
+		},
+		&cli.BoolFlag{
+			Name:     "crawlsub",
+			Value:    false,
+			Usage:    "Crawl subdomains of the target host.",
+			Category: UseArgsGroup,
+		},
+		&cli.StringSliceFlag{
+			Name:     "scope",
+			Usage:    "Extra in-scope regex (matched against full URL), repeatable.",
+			Category: UseArgsGroup,
+		},
+		&cli.StringSliceFlag{
+			Name:     "scopeexclude",
+			Usage:    "Out-of-scope regex (highest priority), repeatable. e.g. --scopeexclude '/logout'",
+			Category: UseArgsGroup,
+		},
+		&cli.BoolFlag{
+			Name:     "outscope",
+			Value:    false,
+			Usage:    "Save out-of-scope URLs found during crawling to <result>.outscope.txt.",
+			Category: OutPutArgsGroup,
+		},
+		&cli.BoolFlag{
+			Name:     "extract",
+			Value:    true,
+			Usage:    "Extract API endpoints from JS responses and crawl them. Use --extract=false to disable.",
+			Category: UseArgsGroup,
+		},
+		&cli.BoolFlag{
+			Name:     "secrets",
+			Value:    true,
+			Usage:    "Detect leaked secrets in text responses, saved to <result>.secrets.txt/.json. Use --secrets=false to disable.",
+			Category: UseArgsGroup,
 		},
 		&cli.BoolFlag{
 			Name:     "update",

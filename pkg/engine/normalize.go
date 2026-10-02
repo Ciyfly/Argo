@@ -205,6 +205,62 @@ func urlIsExists(target string) bool {
 	return true
 }
 
+// ---- 断点续爬支持：已访问键导出/导入 + UrlsQueue 积压的影子集合 ----
+//
+// UrlsQueue 是 chan 无法快照；PushUrlQueue 时登记、PendUrlWork 消费后移除，
+// 影子集合即「已发现未消费」的断点状态。
+
+var pendingShadowMu sync.Mutex
+var pendingShadow map[string]*UrlInfo
+
+// RegisterPendingShadow 登记 URL 进入待处理影子集合。
+func RegisterPendingShadow(uif *UrlInfo) {
+	pendingShadowMu.Lock()
+	if pendingShadow == nil {
+		pendingShadow = make(map[string]*UrlInfo)
+	}
+	pendingShadow[uif.Url] = uif
+	pendingShadowMu.Unlock()
+}
+
+// ConsumePendingShadow 从影子集合移除（已消费或已丢弃）。
+func ConsumePendingShadow(rawURL string) {
+	pendingShadowMu.Lock()
+	delete(pendingShadow, rawURL)
+	pendingShadowMu.Unlock()
+}
+
+// SnapshotPendingShadow 返回待处理 URL 列表副本。
+func SnapshotPendingShadow() []*UrlInfo {
+	pendingShadowMu.Lock()
+	defer pendingShadowMu.Unlock()
+	out := make([]*UrlInfo, 0, len(pendingShadow))
+	for _, uif := range pendingShadow {
+		out = append(out, uif)
+	}
+	return out
+}
+
+// VisitedKeysSnapshot 导出已访问 URL 的去重键（断点续爬用）。
+func VisitedKeysSnapshot() []string {
+	mutex.Lock()
+	defer mutex.Unlock()
+	keys := make([]string, 0, len(NormalizeationPendUrlMap))
+	for k := range NormalizeationPendUrlMap {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// ImportVisitedKeys 批量注入已访问键（--resume 恢复时调用）。
+func ImportVisitedKeys(keys []string) {
+	mutex.Lock()
+	for _, k := range keys {
+		NormalizeationPendUrlMap[k] = 0
+	}
+	mutex.Unlock()
+}
+
 func CloseNormalizeQueue() {
 	NormalizeCloseChanFlag = true
 	close(PendingNormalizeQueue)

@@ -12,6 +12,11 @@ func findUrlMatch(content string) []string {
 	return urls
 }
 
+// FindUrls 提取内容中的 URL，供其它包（如 pkg/extract）复用同一份正则。
+func FindUrls(content string) []string {
+	return findUrlMatch(content)
+}
+
 func MatchKeyExist(content []byte, regexStr string) bool {
 	regex := regexp.MustCompile(regexStr)
 	return regex.Match(content)

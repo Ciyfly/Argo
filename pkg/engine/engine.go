@@ -2,10 +2,13 @@ package engine
 
 import (
 	"argo/pkg/conf"
+	"argo/pkg/extract"
 	"argo/pkg/inject"
 	"argo/pkg/log"
 	"argo/pkg/login"
+	"argo/pkg/ratelimit"
 	"argo/pkg/req"
+	"argo/pkg/scope"
 	"argo/pkg/static"
 	"argo/pkg/utils"
 	"argo/pkg/vector"
@@ -124,18 +127,47 @@ type UrlInfo struct {
 }
 
 func Run(target string) {
+	// 断点续爬：记录当前目标；状态加载必须在 InitEngine 之后（UrlsQueue 那时才创建）
+	lastTarget = target
 	ctx, cancel := context.WithCancel(context.Background())
 	eif := InitEngine(ctx, target)
-	if eif != nil {
-		eif.Start(ctx)
-	} else {
+	if eif == nil {
 		cancel()
 		return
 	}
+	if conf.GlobalConfig.ResumePath != "" {
+		if err := LoadCrawlState(conf.GlobalConfig.ResumePath, target); err != nil {
+			log.Logger.Fatalf("load crawl state %s err: %s", conf.GlobalConfig.ResumePath, err)
+		}
+		// 首页上次已完成时不会被重新打开，Finish 会一直等 FirstPageCloseChan——
+		// 预置完成信号让结束流程正常推进
+		if urlIsExists(target) {
+			log.Logger.Info("[  resume  ] 首页上次已完成，跳过首页等待")
+			eif.FirstPageCloseChan <- true
+		}
+	}
+	eif.Start(ctx)
 	cancel()
 	ClearChan()
 }
 func InitEngine(ctx context.Context, target string) *EngineInfo {
+	// 初始化 scope 规则（host 精确匹配 + 可选正则），并清空上一轮域外记录
+	scope.InitFromTarget(target, conf.GlobalConfig.ScopeConf)
+	scope.ResetOutScope()
+	// 表单填充规则正则启动即校验，写错第一时间 Fatal
+	if _, err := inject.FormRulesCheck(); err != nil {
+		log.Logger.Fatalf("form fill rules: %s", err)
+	}
+	// 初始化密钥规则表（默认规则 + config.yml 追加规则），非法正则直接终止
+	if conf.GlobalConfig.ExtractConf.Secrets {
+		customRules := make([]extract.SecretRule, 0, len(conf.GlobalConfig.ExtractConf.SecretRules))
+		for _, rule := range conf.GlobalConfig.ExtractConf.SecretRules {
+			customRules = append(customRules, extract.SecretRule{Name: rule.Name, Regex: rule.Regex, Severity: rule.Severity})
+		}
+		if err := extract.InitSecretRules(customRules); err != nil {
+			log.Logger.Fatalf("init secret rules: %s", err)
+		}
+	}
 	// 初始化 js注入插件
 	inject.LoadScript()
 	// 初始化 登录插件
@@ -231,12 +263,22 @@ func InitBrowser(target string) *EngineInfo {
 	options.Set("disable-web-security")
 	options.Set("allow-running-insecure-content")
 	options.Set("reduce-security-for-testing")
-	if conf.GlobalConfig.BrowserConf.UnHeadless || conf.GlobalConfig.Dev {
+	// 人工登录模式强制有头：验证码/短信/扫码要真人操作，浏览器必须可见
+	forceHeaded := conf.GlobalConfig.BrowserConf.WaitLogin
+	if conf.GlobalConfig.BrowserConf.UnHeadless || conf.GlobalConfig.Dev || forceHeaded {
 		options = options.Delete("--headless")
 		browser = browser.SlowMotion(time.Duration(conf.GlobalConfig.AutoConf.Slow) * time.Second)
 	}
-	if conf.GlobalConfig.BrowserConf.Proxy != "" {
-		proxyURL, err := url.Parse(conf.GlobalConfig.BrowserConf.Proxy)
+	// 扫描器推送优先于普通代理：浏览器只能设一个代理，
+	// 上游代理（--proxy）应在扫描器侧配置（xray 支持上游代理）
+	proxyAddr := conf.GlobalConfig.BrowserConf.PushProxy
+	if proxyAddr == "" {
+		proxyAddr = conf.GlobalConfig.BrowserConf.Proxy
+	} else if conf.GlobalConfig.BrowserConf.Proxy != "" {
+		log.Logger.Warnf("--proxy %s 被忽略：--pushproxy 生效，上游代理请在扫描器侧配置", conf.GlobalConfig.BrowserConf.Proxy)
+	}
+	if proxyAddr != "" {
+		proxyURL, err := url.Parse(proxyAddr)
 		if err != nil {
 			log.Logger.Fatal("proxy err:", err)
 		}
@@ -261,6 +303,10 @@ func InitBrowser(target string) *EngineInfo {
 	if err != nil {
 		log.Logger.Errorf("browser connect err:%s ", err)
 		return nil
+	}
+	// 扫描器推送提示：pushproxy 不可达时浏览器所有请求都会失败，尽早警告
+	if push := conf.GlobalConfig.BrowserConf.PushProxy; push != "" {
+		log.Logger.Warnf("[   push   ] 全部流量经被动扫描器转发: %s（请确认扫描器已监听）", push)
 	}
 	browser.NoDefaultDevice().MustIncognito()
 	browser.MustIgnoreCertErrors(true)
@@ -327,6 +373,8 @@ func (ei *EngineInfo) Finish() {
 }
 
 func (ei *EngineInfo) Start(ctx context.Context) {
+	// 定期保存断点状态（浏览器被强杀时最多丢 10s 进度）
+	startStateSaver(ctx)
 	if conf.GlobalConfig.BrowserConf.Proxy != "" {
 		log.Logger.Debugf("proxy: %s", conf.GlobalConfig.BrowserConf.Proxy)
 	}
@@ -353,7 +401,7 @@ func (ei *EngineInfo) Start(ctx context.Context) {
 		if ctx.Request.Req() != nil && ctx.Request.Req().URL != nil {
 
 			// 优化, 先判断,再组合
-			if strings.Contains(ctx.Request.URL().String(), ei.HostName) {
+			if scope.IsInScope(ctx.Request.URL().String()) {
 				var save, body io.ReadCloser
 				var saveBytes, reqBytes []byte
 				reqBytes, _ = httputil.DumpRequest(ctx.Request.Req(), true)
@@ -367,8 +415,8 @@ func (ei *EngineInfo) Start(ctx context.Context) {
 				// 这个回调会被多个请求并发调用，reqClient 必须是局部变量，
 				// 否则并发写同一个变量会产生数据竞争。
 				var reqClient *http.Client
-				// proxy
-				if conf.GlobalConfig.BrowserConf.Proxy != "" {
+				// proxy（pushproxy 优先，见 req.EffectiveProxy——扫描器推送时探测流量也不能绕过）
+				if req.EffectiveProxy() != "" {
 					reqClient = req.GetProxyClient()
 				} else {
 					reqClient = http.DefaultClient
@@ -377,7 +425,16 @@ func (ei *EngineInfo) Start(ctx context.Context) {
 				if conf.GlobalConfig.BrowserConf.UserAgent != "" {
 					ctx.Request.Req().Header.Set("User-Agent", conf.GlobalConfig.BrowserConf.UserAgent)
 				}
-				ctx.LoadResponse(reqClient, true)
+				// 加载响应：失败按配置重试（线性退避），错误不再静默吞掉
+				loadErr := ctx.LoadResponse(reqClient, true)
+				for attempt := 1; loadErr != nil && attempt <= conf.GlobalConfig.BrowserConf.Retry; attempt++ {
+					time.Sleep(ratelimit.RetryBackoff(attempt))
+					loadErr = ctx.LoadResponse(reqClient, true)
+				}
+				if loadErr != nil {
+					log.Logger.Debugf("load response %s err: %s", ctx.Request.URL().String(), loadErr)
+					return
+				}
 				// load 后才有响应相关
 				if ctx.Response.Payload().ResponseCode == http.StatusNotFound {
 					return
@@ -397,6 +454,10 @@ func (ei *EngineInfo) Start(ctx context.Context) {
 					// 随机请求的url 404
 					return
 				}
+				// 响应体二次提取：JS 接口入爬取队列、文本响应检密钥。
+				// 提取在 body 编码存储之前做，--norrs 下同样生效。
+				// hybrid fetcher 走同一个函数（extract_hook.go），两路语义一致。
+				processExtractedResponse(ctx.Request.URL().String(), hijackContentType(ctx), ctx.Response.Payload().Body)
 				// fix 管道关闭了但是还推数据的问题
 				if NormalizeCloseChanFlag {
 					return
@@ -416,8 +477,11 @@ func (ei *EngineInfo) Start(ctx context.Context) {
 					pu.ResponseBody = utils.EncodeBase64(ctx.Response.Payload().Body)
 					pu.RequestStr = utils.EncodeBase64(reqBytes)
 				}
-				if strings.HasPrefix(pu.URL, "http://"+ei.Host) || strings.HasPrefix(pu.URL, "https://"+ei.Host) {
+				if scope.IsInScope(pu.URL) {
 					pushpendingNormalizeQueue(pu)
+				} else {
+					// 域外 URL 不入结果，但记录下来供 outscope 输出
+					scope.RecordOutScope(pu.URL)
 				}
 			}
 		}
@@ -438,6 +502,15 @@ func (ei *EngineInfo) Start(ctx context.Context) {
 	}
 	// 等待 metadata 爬取完成
 	metadataWg.Wait()
+	// 常见路径探测（--fuzz 开启时）：与正常爬取并行，有效路径走现有管线
+	if conf.GlobalConfig.FuzzConf.Enable {
+		go func() {
+			static.FuzzPaths(ctx, ei.Target, conf.GlobalConfig.FuzzConf.Dict, func(foundURL string) {
+				log.Logger.Debugf("fuzz hit: %s", foundURL)
+				PushUrlQueue(&UrlInfo{Url: foundURL, SourceType: "path fuzz", SourceUrl: "dict", Depth: 1})
+			})
+		}()
+	}
 	// 打开第一个tab页面 这里应该提交url管道任务
 	PushUrlQueue(&UrlInfo{Url: ei.Target, Depth: 0, SourceType: "homePage", SourceUrl: "target"})
 	page404url := ei.Target + "/" + utils.GenRandStr()
@@ -481,6 +554,8 @@ func (ei *EngineInfo) Start(ctx context.Context) {
 	ei.Finish()
 	ei.Launcher.Kill()
 	ei.SaveResult()
+	// 收尾保存断点状态（续爬起点）
+	SaveCrawlState()
 }
 
 func copyBody(b io.ReadCloser) (r1, r2 io.ReadCloser, err error) {
@@ -503,6 +578,16 @@ func transformHttpHeaders(rspHeaders []*proto.FetchHeaderEntry) http.Header {
 		newRspHeaders.Add(data.Name, data.Value)
 	}
 	return newRspHeaders
+}
+
+// hijackContentType 从劫持到的响应头里取 Content-Type。
+func hijackContentType(ctx *rod.Hijack) string {
+	for _, header := range ctx.Response.Payload().ResponseHeaders {
+		if strings.EqualFold(header.Name, "Content-Type") {
+			return header.Value
+		}
+	}
+	return ""
 }
 
 func ClearChan() {

@@ -96,9 +96,13 @@ GLOBAL OPTIONS:
 
    --browsertimeout value      Set max browser run time, close if limit exceeded. Unit is seconds. (default: 900)
    --chrome value              Specify the Chrome executable path, e.g. --chrome /opt/google/chrome/chrome
+   --hostrate value            Max page navigations per second per host, 0 means no limit. (default: 0)
    --maxdepth value            Scrape web content with increasing depth by crawling URLs, stop at max depth. (default: 5)
+   --rate value                Max page navigations per second, 0 means no limit. (default: 0)
    --remote value              Specify remote Chrome address, e.g. --remote http://127.0.0.1:3000
+   --retry value               Retries for failed static/hijacked requests. (default: 0)
    --tabcount value, -c value  The maximum number of tab pages that can be opened (default: 10)
+   --tabidle value             Close a tab after it has been idle (no new links found) for this many seconds. Pages keep making progress stay open longer. (default: 10)
    --tabtimeout value          Set max tab run time, close if limit exceeded. Unit is seconds. (default: 15)
 
    Data
@@ -119,6 +123,7 @@ GLOBAL OPTIONS:
 
    --format value     Output format separated by commas, txt, json, xlsx, html supported. (default: "txt,json")
    --outputdir value  save output to directory
+   --outscope         Save out-of-scope URLs found during crawling to <result>.outscope.txt. (default: false)
    --quiet            Enable quiet mode to output only the URL information that has been retrieved, in JSON format (default: false)
    --save value       Result saved as 'target' by default. Use '--save test' to save as 'test'.
 
@@ -128,10 +133,15 @@ GLOBAL OPTIONS:
 
    Use
 
-   --norrs                        No storage of req-res strings, saves memory, suitable for large scans. (default: false)
-   --playback value               Support replay like headless YAML scripts
-   --proxy value                  Set up a proxy, for example, http://127.0.0.1:3128
-   --target value, -t value       Specify the entry point for testing
+   --crawlsub                   Crawl subdomains of the target host. (default: false)
+   --extract                    Extract API endpoints from JS responses and crawl them. Use --extract=false to disable. (default: true)
+   --norrs                      No storage of req-res strings, saves memory, suitable for large scans. (default: false)
+   --playback value             Support replay like headless YAML scripts
+   --proxy value                Set up a proxy, for example, http://127.0.0.1:3128
+   --scope value                Extra in-scope regex (matched against full URL), repeatable.
+   --scopeexclude value         Out-of-scope regex (highest priority), repeatable. e.g. --scopeexclude '/logout'
+   --secrets                    Detect leaked secrets in text responses, saved to <result>.secrets.txt/.json. Use --secrets=false to disable. (default: true)
+   --target value, -t value     Specify the entry point for testing
    --targetsfile value, -f value  The file list has targets separated by new lines, like other tools we've used before.
 
 
@@ -216,7 +226,11 @@ argo  -t http://testphp.vulnweb.com/  --userAgent recar123
 
 ### 设置浏览器超时时间 页面超时时间
 
-浏览器默认超时时间 900s 
+浏览器默认超时时间 900s
+
+页面超时是**进度驱动**的：页面还在产出新链接就保持打开，静默超过 `--tabidle`（默认 10s）
+才关闭；`--tabtimeout` 只作为交互预算的下限参与计算。交互元素多的页面（多步流程、多级菜单）
+不会被固定时钟拦腰砍断，挂起页面也会被快速回收。
 
 ### 支持控制事件触发间隔 --slow
 默认是1000ms 即1s 事件如 输入 点击后会等待间隔时间后再继续触发  
@@ -277,7 +291,113 @@ excel表格输出结果如下
 
 
 
+### 人工登录模式 --waitlogin
+验证码/短信/扫码等自动化登录搞不定的场景：开有头浏览器，首页后暂停，
+人在浏览器里完成登录，回终端按回车继续爬取（会话保留）。
+```shell
+./argo -t http://192.168.192.128:8080/ --waitlogin
+```
+stdin 非终端（管道/CI）时自动跳过等待。
+
+### 联动被动扫描器 --pushproxy
+把全部流量（浏览器 + Go 侧探测）转发给被动扫描器，配合 xray 等使用：
+```shell
+# 终端1
+xray webscan --listen 127.0.0.1:7777 --html-output argo.html
+# 终端2
+./argo -t http://target/ --pushproxy http://127.0.0.1:7777
+```
+
+### 常见路径探测 --fuzz
+内置 165 条常见路径字典（可用 --fuzzdict 换外部字典），Go 侧 http 并发探测，
+2xx 或同 host 301 判有效入队，默认关闭：
+```shell
+./argo -t http://target/ --fuzz
+./argo -t http://target/ --fuzz --fuzzdict mydict.txt
+```
+
+### 混合引擎 --engine hybrid
+文档页改用 Go http 抓取+离线解析（首页/空壳页/交互仍走浏览器），速度更快：
+```shell
+./argo -t http://target/ --engine hybrid
+```
+
+### 断点续爬 --resume
+每 10s 保存断点状态（`<结果名>.state.json`），中断后恢复，不重复已访问页面。
+登录态不持久化，恢复后需用 --cookie/--waitlogin 重建：
+```shell
+./argo -t http://target/ --outputdir out --save t
+# 中断后
+./argo -t http://target/ --resume out/t.state.json --outputdir out --save t
+```
+
+### 字段级输出 --fields / --outputtemplate
+```shell
+# json/quiet 只输出选定字段
+./argo -t http://target/ --fields url,method,status --format json
+# txt 行模板（Go text/template）
+./argo -t http://target/ --outputtemplate '{{.Method}} {{.Status}} {{.URL}}'
+```
+
+### 表单字段级填充规则
+config.yml 的 `form.rules`（正则对 name/id/placeholder/aria-label 匹配）与 `form.skip`（命中跳过，
+验证码类默认跳过），内置常见字段语义（搜索/邮箱/手机/日期等）：
+```yaml
+form:
+  rules:
+    - match: "cardno|card_no"
+      value: "110101199001011234"
+  skip: ["captcha|verify_?code|验证码"]
+```
+
 ## 说明
+### Scope 爬取范围控制
+默认只爬目标 host 精确匹配的 URL（同 host 任意端口）。可以用参数扩展或收紧：
+```shell
+# 爬子域
+./argo -t http://a.com/ --crawlsub
+# 额外把合作方域名纳入范围（正则，可重复传）
+./argo -t http://a.com/ --scope '^https?://api\.partner\.com/'
+# 排除登出类路径（优先级最高，可重复传）
+./argo -t http://a.com/ --scopeexclude '/logout'
+# 域外发现的 URL 单独存文件（默认丢弃，开启后存 <结果名>.outscope.txt）
+./argo -t http://a.com/ --outscope
+```
+对应配置文件 `scope:` 段（crawl_subdomains / include / exclude / save_outscope）。
+
+### 限速与重试
+对有 WAF/限流的目标可以控制访问速率，失败请求可重试：
+```shell
+# 每秒最多访问 2 个页面
+./argo -t http://a.com/ --rate 2
+# 单 host 每秒最多 1 个页面
+./argo -t http://a.com/ --hostrate 1
+# 静态请求与页面加载失败重试 2 次
+./argo -t http://a.com/ --retry 2
+```
+默认全部为 0（不限速不重试）。限速只作用于「主动开页面」，不会阻塞浏览器页面内的子资源加载。
+
+### JS 接口提取与密钥泄漏检测
+开启后（默认开启）：
+- 从 JS 文件的响应体和页面内联脚本中提取 API 接口（相对路径、fetch/axios 调用、绝对 URL），
+  自动加入爬取队列访问；
+- 从文本响应体中检测常见密钥泄漏（AWS/GitHub/Slack/Google/Stripe/阿里云 AccessKey、私钥、JWT、密码赋值等），
+  命中打码后输出到 `<结果名>.secrets.txt` / `.secrets.json`，同时在日志中告警。
+```shell
+./argo -t http://a.com/ --secrets=false   # 关闭密钥检测
+./argo -t http://a.com/ --extract=false   # 关闭接口提取
+```
+自定义密钥规则在配置文件 `extract.secret_rules` 里追加：
+```yaml
+extract:
+  enable: true
+  secrets: true
+  secret_rules:
+    - name: "内网token"
+      regex: "inner_[0-9a-z]{20}"
+      severity: "high"
+```
+
 是w8ay师傅知识星球的作业 也是我最近工作相关的于是就做了这个程序 是基于各位大佬的基础上进行设计和实现 当然有任何问题欢迎提 issus 或者跟我联系   
 目前程序还有很多地方可以完善这种程序肯定是需要时间和测试来打磨的 下一步准备测试程序去逼近自动化能完成的 以及下一步准备更好的支持web2.0的网站
 

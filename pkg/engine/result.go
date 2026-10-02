@@ -2,13 +2,17 @@ package engine
 
 import (
 	"argo/pkg/conf"
+	"argo/pkg/extract"
 	"argo/pkg/log"
+	"argo/pkg/scope"
 	"argo/pkg/utils"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path"
+	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -84,6 +88,56 @@ func ResetResult() {
 	resultMu.Unlock()
 	atomic.StoreInt64(&resultPushCount, 0)
 	atomic.StoreInt64(&resultHandledCount, 0)
+	ResetSecrets()
+}
+
+// ---- 密钥泄漏结果收集（模式同 ResultList：锁保护 + 快照读取）----
+
+var (
+	secretMu       sync.Mutex
+	SecretFindings []extract.SecretFinding
+	secretSeen     map[string]bool
+)
+
+// CollectSecret 收集一条密钥命中，按 规则+打码值+URL 去重。
+// 打码值直接进日志与结果文件，完整明文不存在于任何输出。
+func CollectSecret(finding extract.SecretFinding) {
+	secretMu.Lock()
+	if secretSeen == nil {
+		secretSeen = make(map[string]bool)
+	}
+	key := finding.Rule + "|" + finding.MaskedValue + "|" + finding.URL
+	if secretSeen[key] {
+		secretMu.Unlock()
+		return
+	}
+	secretSeen[key] = true
+	SecretFindings = append(SecretFindings, finding)
+	secretMu.Unlock()
+
+	log.Logger.Warnf("[  secret  ] %s %s (%s)", finding.Rule, finding.MaskedValue, finding.URL)
+	if conf.GlobalConfig.Quiet {
+		if jsonData, err := json.Marshal(finding); err == nil {
+			fmt.Println(string(jsonData))
+		}
+	}
+}
+
+// SnapshotSecrets 返回密钥命中列表的副本。
+func SnapshotSecrets() []extract.SecretFinding {
+	secretMu.Lock()
+	defer secretMu.Unlock()
+	out := make([]extract.SecretFinding, len(SecretFindings))
+	copy(out, SecretFindings)
+	return out
+}
+
+// ResetSecrets 每个目标开始前清空上一轮密钥记录。
+func ResetSecrets() {
+	secretMu.Lock()
+	SecretFindings = nil
+	secretSeen = make(map[string]bool)
+	secretMu.Unlock()
 }
 
 func pushResult(pu *PendingUrl) {
@@ -132,7 +186,11 @@ func resultHandlerWork(ctx context.Context, queue chan *PendingUrl) {
 				return
 			}
 			if conf.GlobalConfig.Quiet {
-				jsonData, _ := json.Marshal(data)
+				var line interface{} = data
+				if selected := filterResultFields(conf.GlobalConfig.ResultConf.Fields); selected != nil {
+					line = filteredResultMap(data, selected)
+				}
+				jsonData, _ := json.Marshal(line)
 				fmt.Println(string(jsonData))
 			} else {
 				resultMu.Lock()
@@ -162,8 +220,95 @@ func writeResult(name string, data []byte) {
 }
 
 // writeResultToJson 等写文件函数统一接收快照，避免遍历时结果列表被并发追加。
+// 合法的 --fields 字段名（与 PendingUrl 字段一一对应）
+var resultFieldNames = map[string]string{
+	"url":           "URL",
+	"method":        "Method",
+	"host":          "Host",
+	"data":          "Data",
+	"status":        "Status",
+	"request_str":   "RequestStr",
+	"response_body": "ResponseBody",
+}
+
+// filterResultFields 按 --fields 过滤结果字段。
+// fields 为空返回 nil（表示不过滤，序列化全字段）；非法字段名 Fatal 提示合法集合。
+func filterResultFields(fields string) map[string]string {
+	fields = strings.TrimSpace(fields)
+	if fields == "" {
+		return nil
+	}
+	selected := make(map[string]string)
+	for _, name := range strings.Split(fields, ",") {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		field, ok := resultFieldNames[name]
+		if !ok {
+			valid := make([]string, 0, len(resultFieldNames))
+			for k := range resultFieldNames {
+				valid = append(valid, k)
+			}
+			sort.Strings(valid)
+			log.Logger.Fatalf("--fields 非法字段 %q，合法字段: %s", name, strings.Join(valid, ","))
+		}
+		selected[name] = field
+	}
+	return selected
+}
+
+// filteredResultMap 把一条结果按选定字段构造成 map（json 输出用）。
+// selected 为 nil 时返回 nil（调用方走全字段结构体序列化路径）。
+func filteredResultMap(pu *PendingUrl, selected map[string]string) map[string]interface{} {
+	if selected == nil {
+		return nil
+	}
+	out := make(map[string]interface{}, len(selected))
+	for name, field := range selected {
+		v := reflect.ValueOf(pu).Elem().FieldByName(field)
+		if !v.IsValid() {
+			continue
+		}
+		out[name] = v.Interface()
+	}
+	return out
+}
+
+// marshalResult 序列化一条/一批结果：有字段过滤时构造 map 列表，否则原样。
+func marshalResult(list []*PendingUrl, selected map[string]string) ([]byte, error) {
+	if selected == nil {
+		return json.MarshalIndent(list, "", "    ")
+	}
+	rows := make([]map[string]interface{}, 0, len(list))
+	for _, pu := range list {
+		rows = append(rows, filteredResultMap(pu, selected))
+	}
+	return json.MarshalIndent(rows, "", "    ")
+}
+
+// resultLine 渲染一条结果的 txt 行：--outputtemplate 模板优先，否则固定 [METHOD]URL。
+// 模板执行失败降级为固定格式并记日志，不让单行错误中断整个落盘。
+func resultLine(pu *PendingUrl) string {
+	tplStr := strings.TrimSpace(conf.GlobalConfig.ResultConf.OutputTemplate)
+	if tplStr == "" {
+		return fmt.Sprintf("[%s]%s\n", pu.Method, pu.URL)
+	}
+	tpl, err := template.New("line").Parse(tplStr)
+	if err != nil {
+		log.Logger.Errorf("outputtemplate 解析错误，回退默认格式: %s", err)
+		return fmt.Sprintf("[%s]%s\n", pu.Method, pu.URL)
+	}
+	var buf strings.Builder
+	if err := tpl.Execute(&buf, pu); err != nil {
+		log.Logger.Debugf("outputtemplate 渲染失败，回退默认格式: %s", err)
+		return fmt.Sprintf("[%s]%s\n", pu.Method, pu.URL)
+	}
+	return buf.String() + "\n"
+}
+
 func writeResultToJson(name string, data *HtmlData) {
-	jsonData, err := json.MarshalIndent(data.ResultList, "", "    ")
+	jsonData, err := marshalResult(data.ResultList, filterResultFields(conf.GlobalConfig.ResultConf.Fields))
 	if err != nil {
 		log.Logger.Errorf("save result err: %s", err)
 		return
@@ -174,7 +319,7 @@ func writeResultToJson(name string, data *HtmlData) {
 func writeResultToText(name string, data *HtmlData) {
 	txtDate := ""
 	for _, r := range data.ResultList {
-		txtDate += fmt.Sprintf("[%s]%s\n", r.Method, r.URL)
+		txtDate += resultLine(r)
 	}
 	writeResult(name, []byte(txtDate))
 }
@@ -316,6 +461,49 @@ func (ei *EngineInfo) SaveResult() {
 			log.Logger.Errorf("format not found: %s", format)
 		}
 	}
+
+	// 域外发现的 URL 单独输出（--outscope / scope.save_outscope 开启时）
+	saveOutScope(conf.GlobalConfig.ScopeConf.SaveOutScope, ResultOutPutDir, saveName)
+	// 密钥命中输出（--secrets 开启且有命中时）
+	saveSecretResult(ResultOutPutDir, saveName)
+}
+
+// saveSecretResult 把密钥命中写到 <saveName>.secrets.txt / .secrets.json。
+func saveSecretResult(outputDir string, saveName string) {
+	findings := SnapshotSecrets()
+	if len(findings) == 0 {
+		return
+	}
+	txtLines := make([]string, 0, len(findings))
+	for _, finding := range findings {
+		txtLines = append(txtLines, fmt.Sprintf("[%s][%s] %s (%s)",
+			finding.Severity, finding.Rule, finding.MaskedValue, finding.URL))
+	}
+	writeResult(path.Join(outputDir, saveName+".secrets.txt"), []byte(strings.Join(txtLines, "\n")+"\n"))
+
+	jsonData, err := json.MarshalIndent(findings, "", "  ")
+	if err != nil {
+		log.Logger.Errorf("marshal secrets err: %s", err)
+		return
+	}
+	writeResult(path.Join(outputDir, saveName+".secrets.json"), jsonData)
+	log.Logger.Infof("[   save   ] %s (%d secret findings)", path.Join(outputDir, saveName+".secrets.txt"), len(findings))
+}
+
+// saveOutScope 把爬取过程中记录的域外 URL 写到 <saveName>.outscope.txt。
+// 这些是页面上出现但不属于爬取范围的外部资产，对攻击面梳理有价值。
+func saveOutScope(enabled bool, outputDir string, saveName string) {
+	if !enabled {
+		return
+	}
+	outScopeUrls := scope.SnapshotOutScope()
+	if len(outScopeUrls) == 0 {
+		return
+	}
+	filePath := path.Join(outputDir, saveName+".outscope.txt")
+	content := strings.Join(outScopeUrls, "\n") + "\n"
+	writeResult(filePath, []byte(content))
+	log.Logger.Infof("[   save   ] %s (%d out-of-scope urls)", filePath, len(outScopeUrls))
 }
 
 // appendToFile 根据不同格式追加内容到文件
@@ -343,7 +531,7 @@ func appendTxtResult(filePath string, results []*PendingUrl) error {
 	defer f.Close()
 
 	for _, r := range results {
-		_, err = fmt.Fprintf(f, "[%s]%s\n", r.Method, r.URL)
+		_, err = fmt.Fprint(f, resultLine(r))
 		if err != nil {
 			return err
 		}
@@ -351,28 +539,34 @@ func appendTxtResult(filePath string, results []*PendingUrl) error {
 	return nil
 }
 
-// appendJsonResult 追加JSON格式结果
+// appendJsonResult 追加JSON格式结果。
+// 追加路径统一用 map 结构（字段过滤与全字段共用一条逻辑，
+// 旧文件里的结构体 JSON 反序列化成 map 同样成立，输出形状不变）。
 func appendJsonResult(filePath string, results []*PendingUrl) error {
-	var existingData []*PendingUrl
+	var existingData []map[string]interface{}
+	selected := filterResultFields(conf.GlobalConfig.ResultConf.Fields)
 
-	// 读取现有文件
 	if utils.IsExist(filePath) {
 		data, err := os.ReadFile(filePath)
 		if err != nil {
 			return err
 		}
 		if len(data) > 0 {
-			err = json.Unmarshal(data, &existingData)
-			if err != nil {
+			if err := json.Unmarshal(data, &existingData); err != nil {
 				return err
 			}
 		}
 	}
 
-	// 合并数据
-	existingData = append(existingData, results...)
+	for _, r := range results {
+		if selected == nil {
+			// 全字段：map 里带上全部合法字段
+			existingData = append(existingData, filteredResultMap(r, resultFieldNames))
+		} else {
+			existingData = append(existingData, filteredResultMap(r, selected))
+		}
+	}
 
-	// 写入文件
 	data, err := json.MarshalIndent(existingData, "", "  ")
 	if err != nil {
 		return err

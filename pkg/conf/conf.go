@@ -45,9 +45,28 @@ browser:
   browser_timeout: 600 # 浏览器运行最长时间
   max_depth: 3 # 爬行最大深度
   user_agent: ""
+  wait_login: false # 人工登录模式：强制有头，首页后暂停等回车再继续（验证码场景）
+  push_proxy: "" # 被动扫描器地址，如 http://127.0.0.1:7777（xray webscan --listen）
+  engine: "headless" # headless 全浏览器 | hybrid 文档页 Go 抓取分流（更快）
 auto:
   slow: 1000 # 事件触发的延迟时间
   filter: ["lougout", "登出", "reset"] # 包含这种字符的就不进行触发事件
+  tab_idle: 10 # 页面静默多少秒后关闭（还在出新链接就不关），0 用默认 10s
+
+scope:
+  crawl_subdomains: false # 是否把目标 host 的子域也纳入爬取范围
+  include: [] # 额外入域的正则列表（对完整 URL 匹配），如 ['^https?://[a-z]+\.partner\.com/']
+  exclude: [] # 强制出域的正则列表，如 ['/logout', '/reset']
+  save_outscope: false # 是否把域外发现的 URL 单独输出到 <结果名>.outscope.txt
+
+extract:
+  enable: true # 从 JS 响应体提取 API 接口并入队爬取
+  secrets: true # 从文本响应体检测密钥泄漏并输出
+  secret_rules: [] # 追加的密钥规则 [{name, regex, severity}]，如 [{name: "内网token", regex: "inner_[0-9a-z]{20}", severity: "high"}]
+
+form:
+  rules: [] # 字段级填充规则（正则对 name/id/placeholder 匹配），如 [{match: "cardno", value: "110101199001011234"}]
+  skip: ["captcha|verify_?code|validate_?code|短信验证码|验证码|otp"] # 命中即跳过的字段（正则）
 
 `
 
@@ -55,6 +74,9 @@ type Conf struct {
 	LoginConf        LoginConf   `yaml:"login"`
 	BrowserConf      BrowserConf `yaml:"browser"`
 	AutoConf         AutoConf    `yaml:"auto"`
+	ScopeConf        ScopeConf   `yaml:"scope"`
+	ExtractConf      ExtractConf `yaml:"extract"`
+	FormConf         FormConf    `yaml:"form"`
 	InjectScriptPath string
 	ResultConf       ResultConf
 	PlaybackPath     string
@@ -70,14 +92,40 @@ type Conf struct {
 	// 浏览器启动后注入，之后页面导航/XHR/表单提交全会带上——
 	// 登录后才能访问的入口（会员区、管理后台）靠这个才能被发现。
 	Cookies []string
+	// FuzzConf 常见路径探测
+	FuzzConf FuzzConf
+	// ResumePath 断点续爬状态文件路径（--resume）
+	ResumePath string
+}
+
+// FuzzConf 常见路径探测配置（Go 侧 http，不开浏览器）
+type FuzzConf struct {
+	Enable bool   `yaml:"enable"`
+	Dict   string `yaml:"dict"`
 }
 
 // 保存的格式
 type ResultConf struct {
-	OutputDir    string
-	Format       string
-	Name         string
-	MergedOutput string
+	OutputDir      string
+	Format         string
+	Name           string
+	MergedOutput   string
+	Fields         string
+	OutputTemplate string
+}
+
+// 表单字段级填充规则
+type FormConf struct {
+	// Rules 按序匹配（正则，对 name/id/placeholder/aria-label 拼串小写匹配），命中即填 value
+	Rules []FormFillRule `yaml:"rules"`
+	// Skip 命中即不填（验证码类字段默认跳过，避免假值卡住校验）
+	Skip []string `yaml:"skip"`
+}
+
+// FormFillRule 单条填充规则
+type FormFillRule struct {
+	Match string `yaml:"match"`
+	Value string `yaml:"value"`
 }
 
 // 默认的用户名密码
@@ -100,6 +148,41 @@ type BrowserConf struct {
 	Chrome         string `yaml:"chrome"`
 	Remote         string `yaml:"remote"`
 	UserAgent      string `yaml:"user_agent"`
+	// WaitLogin 人工登录模式：强制有头，首页加载后暂停等终端回车再继续爬取。
+	// 验证码/短信/扫码等自动化登录搞不定的场景靠它。
+	WaitLogin bool `yaml:"wait_login"`
+	// PushProxy 被动扫描器地址（xray webscan --listen 等），全部流量经它转发。
+	PushProxy string `yaml:"push_proxy"`
+	// Engine headless=全浏览器（默认），hybrid=文档页 Go 抓取分流
+	Engine string `yaml:"engine"`
+	// RateLimit 全局导航限速（每秒最多访问的页面数），0 不限
+	RateLimit int `yaml:"rate_limit"`
+	// HostRateLimit 单 host 导航限速（每秒），0 不限
+	HostRateLimit int `yaml:"host_rate_limit"`
+	// Retry 静态请求与 hijack 加载失败的重试次数，默认 0
+	Retry int `yaml:"retry"`
+}
+
+// 爬取范围规则
+type ScopeConf struct {
+	CrawlSubdomains bool     `yaml:"crawl_subdomains"`
+	Include         []string `yaml:"include"`
+	Exclude         []string `yaml:"exclude"`
+	SaveOutScope    bool     `yaml:"save_outscope"`
+}
+
+// 响应体二次提取：接口与密钥
+type ExtractConf struct {
+	Enable      bool         `yaml:"enable"`
+	Secrets     bool         `yaml:"secrets"`
+	SecretRules []SecretRule `yaml:"secret_rules"`
+}
+
+// SecretRuleYaml 单条自定义密钥规则
+type SecretRule struct {
+	Name     string `yaml:"name"`
+	Regex    string `yaml:"regex"`
+	Severity string `yaml:"severity"`
 }
 
 // auto 自动触发的一些参数
@@ -111,6 +194,9 @@ type AutoConf struct {
 	MaxClickRepeat int `yaml:"max_click_repeat"`
 	// ShortcutKey 要模拟的键盘快捷键，默认 Ctrl+Shift+S。
 	ShortcutKey string `yaml:"shortcut_key"`
+	// TabIdle 页面静默多少秒后关闭（进度驱动超时：有新链接就不算静默）。
+	// 0 表示用默认值 10s。
+	TabIdle int `yaml:"tab_idle"`
 }
 
 func readYamlConfig(configFile string) {
@@ -194,6 +280,29 @@ func MergeArgs(c *cli.Context) {
 	pprofAddr := c.String("pprofaddr")
 	// 预置会话 Cookie（可重复传）
 	cookies := c.StringSlice("cookie")
+	// 限速与重试
+	rate := c.Int("rate")
+	hostRate := c.Int("hostrate")
+	retry := c.Int("retry")
+	// scope
+	crawlSub := c.Bool("crawlsub")
+	scopeInclude := c.StringSlice("scope")
+	scopeExclude := c.StringSlice("scopeexclude")
+	saveOutScope := c.Bool("outscope")
+	// 提取
+	extractEnable := c.Bool("extract")
+	extractSecrets := c.Bool("secrets")
+	// 人工登录 / 扫描器推送 / 引擎
+	waitLogin := c.Bool("waitlogin")
+	pushProxy := c.String("pushproxy")
+	engineMode := c.String("engine")
+	// 输出
+	outputFields := c.String("fields")
+	outputTemplate := c.String("outputtemplate")
+	// 路径探测 / 续爬
+	fuzzEnable := c.Bool("fuzz")
+	fuzzDict := c.String("fuzzdict")
+	resumePath := c.String("resume")
 
 	// 目标
 	if target != "" {
@@ -252,6 +361,51 @@ func MergeArgs(c *cli.Context) {
 	if userAgent != GlobalConfig.BrowserConf.UserAgent {
 		GlobalConfig.BrowserConf.UserAgent = userAgent
 	}
+	// 限速与重试（默认 0 = 不限速不重试，行为与历史版本一致）
+	if rate != GlobalConfig.BrowserConf.RateLimit {
+		GlobalConfig.BrowserConf.RateLimit = rate
+	}
+	if hostRate != GlobalConfig.BrowserConf.HostRateLimit {
+		GlobalConfig.BrowserConf.HostRateLimit = hostRate
+	}
+	if retry != GlobalConfig.BrowserConf.Retry {
+		GlobalConfig.BrowserConf.Retry = retry
+	}
+	// scope
+	if crawlSub != GlobalConfig.ScopeConf.CrawlSubdomains {
+		GlobalConfig.ScopeConf.CrawlSubdomains = crawlSub
+	}
+	if len(scopeInclude) > 0 {
+		GlobalConfig.ScopeConf.Include = scopeInclude
+	}
+	if len(scopeExclude) > 0 {
+		GlobalConfig.ScopeConf.Exclude = scopeExclude
+	}
+	if saveOutScope != GlobalConfig.ScopeConf.SaveOutScope {
+		GlobalConfig.ScopeConf.SaveOutScope = saveOutScope
+	}
+	// 提取（默认 true；显式传 --extract=false 可关闭）
+	if extractEnable != GlobalConfig.ExtractConf.Enable {
+		GlobalConfig.ExtractConf.Enable = extractEnable
+	}
+	if extractSecrets != GlobalConfig.ExtractConf.Secrets {
+		GlobalConfig.ExtractConf.Secrets = extractSecrets
+	}
+	// 人工登录 / 扫描器推送 / 引擎模式
+	if waitLogin != GlobalConfig.BrowserConf.WaitLogin {
+		GlobalConfig.BrowserConf.WaitLogin = waitLogin
+	}
+	if pushProxy != "" {
+		GlobalConfig.BrowserConf.PushProxy = pushProxy
+	}
+	GlobalConfig.BrowserConf.Engine = engineMode
+	// 输出
+	GlobalConfig.ResultConf.Fields = outputFields
+	GlobalConfig.ResultConf.OutputTemplate = outputTemplate
+	// 路径探测 / 续爬
+	GlobalConfig.FuzzConf.Enable = fuzzEnable
+	GlobalConfig.FuzzConf.Dict = fuzzDict
+	GlobalConfig.ResumePath = resumePath
 	// 登录参数
 	if username != GlobalConfig.LoginConf.Username {
 		GlobalConfig.LoginConf.Username = username
@@ -262,6 +416,11 @@ func MergeArgs(c *cli.Context) {
 	// auto
 	if slow != GlobalConfig.AutoConf.Slow {
 		GlobalConfig.AutoConf.Slow = slow
+	}
+	// 进度驱动的页面 idle 超时（0 = 默认 10s）
+	tabIdle := c.Int("tabidle")
+	if tabIdle != GlobalConfig.AutoConf.TabIdle {
+		GlobalConfig.AutoConf.TabIdle = tabIdle
 	}
 	// playback
 	GlobalConfig.PlaybackPath = playback

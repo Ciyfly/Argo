@@ -21,6 +21,23 @@ var NormalizeCloseChanFlag bool
 var NormalizeationResultMap map[string]int
 var NormalizeationPendUrlMap map[string]int
 
+// 按「泛化模式」计数，用于防止同一模式无限翻页。
+//
+// 历史做法是把参数值直接泛化成占位符当作去重键，
+// 结果 ?id=1 / ?id=2 / ?id=99 全被当成同一个 URL，
+// 只留第一条，其余全丢（靶场实测 query 类 1/4）。
+//
+// 现在改为：去重键保留具体值（不同页面就是不同页面），
+// 只对同一模式限制总条数，兼顾「不丢页面」与「不无限翻」。
+var (
+	normalizePatternCount map[string]int
+	normalizePatternSeen  map[string]bool
+)
+
+// maxURLsPerPattern 同一泛化模式最多允许出现的不同 URL 数。
+// 超过后视为翻页噪声丢弃，避免 ?id=1..100000 把队列撑爆。
+const maxURLsPerPattern = 50
+
 type PendingUrl struct {
 	URL             string
 	Method          string
@@ -40,6 +57,8 @@ func InitNormalize(ctx context.Context) {
 	NormalizeCloseChan = make(chan int)
 	NormalizeationResultMap = make(map[string]int)
 	NormalizeationPendUrlMap = make(map[string]int)
+	normalizePatternCount = make(map[string]int)
+	normalizePatternSeen = make(map[string]bool)
 	NormalizeCloseChanFlag = false
 	go normalizeWork(ctx)
 }
@@ -71,9 +90,16 @@ func normalizeWork(ctx context.Context) {
 				urlStr = urlStr[:idx]
 			}
 			if !filterStatic(urlStr) {
-				value := normalizeation(urlStr, data.Method)
-				if _, ok := NormalizeationResultMap[value]; !ok {
-					NormalizeationResultMap[value] = 0
+				exactKey := normalizeation(urlStr, data.Method)
+				patternKey := normalizeationPattern(urlStr, data.Method)
+				if _, ok := NormalizeationResultMap[exactKey]; !ok {
+					// 同一模式超过上限则丢弃（防无限翻页），否则按精确 URL 去重
+					if normalizePatternCount[patternKey] >= maxURLsPerPattern {
+						log.Logger.Debugf("normalize pattern limit reached: %s", urlStr)
+						continue
+					}
+					NormalizeationResultMap[exactKey] = 0
+					normalizePatternCount[patternKey]++
 					pushResult(data)
 				}
 			}
@@ -101,51 +127,69 @@ func normalizeationPath(pathStr string) string {
 	return normalizedUrl
 }
 
+// normalizeation 生成「精确去重键」：保留 URL 的具体内容。
+//
+// 历史实现把参数值和 path 里的数字都替换成占位符，
+// 导致 ?id=1 / ?id=2 / ?id=99 被当成同一个 URL，
+// 分页路径也相互覆盖（靶场实测 query 类 1/4、html 类 10/13）。
+//
+// 不同页面就是不同页面，这里不再合并；
+// 防止无限翻页交给 normalizeationPattern + maxURLsPerPattern。
 func normalizeation(target, method string) string {
 	u, _ := url.Parse(target)
-	// 参数泛化
+	key := method + "|" + strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Host) + u.Path
+	// query 按 key 排序，保证 ?a=1&b=2 与 ?b=2&a=1 视为同一个
 	params := u.Query()
 	keys := make([]string, 0, len(params))
 	for k := range params {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	var paramsStr string
 	for _, k := range keys {
-		values := params[k]
+		values := append([]string(nil), params[k]...)
+		sort.Strings(values)
 		for _, v := range values {
+			key += "&" + k + "=" + v
+		}
+	}
+	log.Logger.Debugf("normalizeStr url %s -> %s", u.String(), key)
+	return utils.GetMD5(key)
+}
+
+// normalizeationPattern 生成「泛化模式键」：把易变部分抹平。
+//
+// 用于统计同一类 URL 出现了多少条，超过 maxURLsPerPattern 就不再收录，
+// 避免 ?id=1..100000 或 /page/1..N 把队列撑爆。
+func normalizeationPattern(target, method string) string {
+	u, _ := url.Parse(target)
+	pattern := strings.ToLower(u.Host)
+	if u.Path != "" {
+		pattern += normalizeationPath(u.Path)
+	}
+	// 参数只保留 key 和「值的类型」
+	params := u.Query()
+	keys := make([]string, 0, len(params))
+	for k := range params {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		for _, v := range params[k] {
 			if isNumber(v) {
-				paramsStr += k + "=" + "@"
+				pattern += k + "=@"
 			} else {
-				paramsStr += k + "=" + "$"
+				pattern += k + "=$"
 			}
 		}
 	}
-	// path 泛化
-	normalizeStr := strings.ToLower(u.Host)
-	if u.Path != "" {
-		norPath := normalizeationPath(u.Path)
-		normalizeStr += norPath
-	}
-	if paramsStr != "" {
-		normalizeStr += paramsStr
-	}
-	// 对于 page/1 page/2 这种url进行处理 认为只有一个url
+	// 形如 /page/1 /page/2 的翻页路径归为同一个模式
 	pathList := strings.Split(u.Path, "/")
-	if isNumber(pathList[len(pathList)-1]) {
-		normalizeStr = "|" + u.Scheme + "://" + u.Host + strings.Join(pathList[:len(pathList)-1], "/") + "/@"
+	if len(pathList) > 0 && isNumber(pathList[len(pathList)-1]) {
+		pattern = "|" + u.Scheme + "://" + u.Host + strings.Join(pathList[:len(pathList)-1], "/") + "/@"
 	} else {
-		normalizeStr = method + "|" + normalizeStr
+		pattern = method + "|" + pattern
 	}
-	// 使用 strings.Builder 来构建字符串
-	var sb strings.Builder
-	sb.WriteString("normalizeStr url ")
-	sb.WriteString(u.String())
-	sb.WriteString(" -> ")
-	sb.WriteString(normalizeStr)
-	log.Logger.Debugf(sb.String())
-
-	return utils.GetMD5(normalizeStr)
+	return utils.GetMD5(pattern)
 }
 
 func urlIsExists(target string) bool {

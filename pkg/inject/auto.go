@@ -49,13 +49,121 @@ var autoFillJS = `(username, password, email, phone) => {
 // 用浏览器解析后的 a.href，避免页面跳转后相对路径算错。
 var scanLinksJS = `() => {
 	const out = [];
-	document.querySelectorAll("a[href], area[href]").forEach(function (a) {
-		const raw = a.getAttribute("href");
-		if (!raw || raw === "#" || raw.indexOf("javascript:") === 0) { return; }
-		const abs = a.href;
-		if (abs && abs.indexOf("http") === 0) { out.push(abs); }
+	const seen = new Set();
+	function add(v) {
+		if (!v) { return; }
+		const s = String(v).trim();
+		if (!s || s === "#" || s.indexOf("javascript:") === 0 || s.indexOf("mailto:") === 0 || s.indexOf("tel:") === 0) { return; }
+		try {
+			const abs = new URL(s, document.baseURI).href;
+			if (abs.indexOf("http") === 0 && !seen.has(abs)) { seen.add(abs); out.push(abs); }
+		} catch (e) {}
+	}
+	document.querySelectorAll("a[href], area[href], iframe[src], frame[src], form[action]").forEach(function (el) {
+		add(el.getAttribute("href") || el.getAttribute("src") || el.getAttribute("action"));
 	});
 	return out;
+}`
+
+var scanLinksDeepJS = `() => {
+	const out = [];
+	const seen = new Set();
+	function add(v) {
+		if (!v) { return; }
+		const s = String(v).trim();
+		if (!s || s === "#" || s.indexOf("javascript:") === 0 || s.indexOf("mailto:") === 0 || s.indexOf("tel:") === 0) { return; }
+		try {
+			const abs = new URL(s, document.baseURI).href;
+			if (abs.indexOf("http") === 0 && !seen.has(abs)) { seen.add(abs); out.push(abs); }
+		} catch (e) {}
+	}
+	function looksLikeURL(v) {
+		const s = String(v).trim();
+		if (s.length < 4 || s.length > 2048) { return false; }
+		if (s.indexOf("/") === 0) { return true; }
+		if (/^https?:\/\//i.test(s)) { return true; }
+		if (s.indexOf("/") > 0 && !/\s/.test(s)) { return true; }
+		return false;
+	}
+	function scanAttrs(root) {
+		let all;
+		try { all = root.querySelectorAll("*"); } catch (e) { return; }
+		Array.prototype.forEach.call(all, function (el) {
+			const tag = el.tagName;
+			if (tag === "SCRIPT" || tag === "STYLE" || tag === "NOSCRIPT") { return; }
+			const n = el.attributes ? el.attributes.length : 0;
+			for (let i = 0; i < n; i++) {
+				const a = el.attributes[i];
+				// class/style/id/value 是高噪声属性，跳过减少误报
+				if (a.name === "class" || a.name === "style" || a.name === "id" || a.name === "value") { continue; }
+				const v = a.value;
+				if (v && looksLikeURL(v)) { add(v); }
+			}
+		});
+	}
+	scanAttrs(document);
+	const walked = new Set();
+	(function walk(root, depth) {
+		if (depth > 6) { return; }
+		let hosts;
+		try { hosts = root.querySelectorAll("*"); } catch (e) { return; }
+		Array.prototype.forEach.call(hosts, function (el) {
+			if (!el || walked.has(el)) { return; }
+			let sr = null;
+			try { sr = el.shadowRoot; } catch (e) { return; }
+			if (!sr) { return; }
+			walked.add(el);
+			scanAttrs(sr);
+			walk(sr, depth + 1);
+		});
+	})(document, 0);
+	return out;
+}`
+
+var submitFormsJS = `(username, password, email, phone) => {
+	const done = [];
+	function fill(el) {
+		const type = (el.type || "text").toLowerCase();
+		if (el.value && el.value.length > 0) { return; }
+		if (type === "email") { el.value = email; }
+		else if (type === "password") { el.value = password; }
+		else if (type === "tel") { el.value = phone; }
+		else if (type === "number") { el.value = "20"; }
+		else if (type === "text" || type === "search" || type === "url") { el.value = username; }
+		else if (type === "checkbox" || type === "radio") { el.checked = true; }
+		try {
+			el.dispatchEvent(new Event("input", {bubbles: true}));
+			el.dispatchEvent(new Event("change", {bubbles: true}));
+		} catch (e) {}
+	}
+	Array.prototype.forEach.call(document.querySelectorAll("form"), function (f) {
+		const action = f.getAttribute("action") || "";
+		if (!action) { return; }
+		// 跳过登出类表单，避免把会话搞没
+		const low = (action + " " + (f.innerHTML || "")).toLowerCase();
+		if (low.indexOf("logout") >= 0 || low.indexOf("signout") >= 0) { return; }
+		Array.prototype.forEach.call(f.querySelectorAll("input, select, textarea"), function (el) {
+			if (!el.name) { return; }
+			if (el.tagName === "SELECT") {
+				if (!el.value) {
+					for (let i = 0; i < el.options.length; i++) {
+						if (el.options[i].value) { el.selectedIndex = i; break; }
+					}
+				}
+				return;
+			}
+			fill(el);
+		});
+		// 优先用 requestSubmit（会跑校验并触发 submit 事件），退回 submit()
+		try {
+			if (typeof f.requestSubmit === "function") { f.requestSubmit(); }
+			else { f.submit(); }
+			done.push(action);
+		} catch (e) {
+			try { f.submit(); done.push(action); } catch (e2) {}
+		}
+	});
+	return done;
 }`
 
 // listClickableJS 列出可点击元素，附带稳定签名与是否应跳过。
@@ -308,12 +416,19 @@ func Auto(page *rod.Page) []string {
 	if maxSettle > 250*time.Millisecond {
 		maxSettle = 250 * time.Millisecond
 	}
-	// 交互预算。
+	// 交互预算 = max(tabTimeout, browserTimeout/4)。
 	//
-	// 不能只按单个 tab 的超时来算：一个页面上几十个可交互元素，
-	// 预算太小会导致后面的元素根本轮不到（实测小预算时 multi-step 一条都拿不到）。
-	// 这里给一个下限，保证交互有机会跑完。
+	// 单页交互如果只按 tabTimeout 算，元素多的页面跑不完
+	// （实测小预算时 multi-step 一条都拿不到）；
+	// 但也不能拿满全局预算：tab 是并发的，单页吃满会挤掉同批其他页面，
+	// 且任务总时长会撞上 browserTimeout 被硬切
+	// （实测产生 200 条与 80 条的双峰波动，shop/pagination 大量丢失）。
+	// 所以给一个居中的上限：全局预算的四分之一。
 	budget := time.Duration(cfg.BrowserConf.TabTimeout) * time.Second
+	globalShare := time.Duration(cfg.BrowserConf.BrowserTimeout) * time.Second / 4
+	if globalShare > budget {
+		budget = globalShare
+	}
 	if budget < 12*time.Second {
 		budget = 12 * time.Second
 	}
@@ -336,6 +451,21 @@ func Auto(page *rod.Page) []string {
 		}
 	}
 
+	collectDeep := func() {
+		res, err := page.Eval(scanLinksDeepJS)
+		if err != nil {
+			return
+		}
+		for _, v := range res.Value.Arr() {
+			h := v.Str()
+			if h == "" || seen[h] {
+				continue
+			}
+			seen[h] = true
+			hrefList = append(hrefList, h)
+		}
+	}
+
 	// 1. 先填表单，让需要登录的页面进入登录态
 	if _, err := page.Eval(autoFillJS,
 		cfg.LoginConf.Username, cfg.LoginConf.Password,
@@ -343,8 +473,9 @@ func Auto(page *rod.Page) []string {
 		log.Logger.Debugf("auto fill err: %s", err)
 	}
 
-	// 2. 记录基线链接
+	// 2. 记录基线链接（含冷路径全量扫描）
 	collect()
+	collectDeep()
 
 	// 3. 记录基线链接
 	collect()
@@ -353,9 +484,11 @@ func Auto(page *rod.Page) []string {
 	//
 	// 每个元素最多点 maxRepeat 轮：多步流程（向导/解锁/结算）
 	// 需要反复点同一个按钮才会逐步放出后续链接，只点一次拿不到。
+	// 默认 5：多步流程（向导 4 步、结算 4 步、解锁 3 步）
+	// 实测默认 3 时最后一步拿不到，改 5 后 multi-step 明显提升。
 	maxRepeat := cfg.AutoConf.MaxClickRepeat
 	if maxRepeat <= 0 {
-		maxRepeat = 3
+		maxRepeat = 5
 	}
 	res, err := page.Eval(listClickableJS, cfg.AutoConf.Filter)
 	if err != nil {
@@ -417,23 +550,33 @@ func Auto(page *rod.Page) []string {
 		}
 	}
 
-	// 4b. 处理点击后「新生成」的可点击元素。
+	// 4b. 迭代处理点击后「新生成」的可点击元素。
 	//
-	// 有些入口是两步的：先点一个按钮，页面才生成真正的入口按钮
-	// （如「确认后展开」生成的确认按钮）。上面那份列表在开头就固定了，
-	// 看不到后来才出现的元素，这里再扫一轮把它们补上。
+	// 有些入口是多层的：点一个按钮，页面才生成下一个入口按钮，
+	// 点它又生成再下一层（实测菜单链三层、确认门两层）。
+	// 只补扫一轮的话，第三层永远拿不到。
 	//
-	// 用「签名集合差」找新元素，而不是拿下标切片：
-	// 新按钮不一定插在列表末尾，按下标取会取到旧元素。
+	// 收敛循环：反复用「签名集合差」找没点过的新元素并点掉，
+	// 直到没有新元素或预算耗尽。通用机制——不认识具体页面，只按「新元素」驱动。
 	if time.Now().Before(deadline) {
-		if res, err := page.Eval(listClickableJS, cfg.AutoConf.Filter); err == nil {
-			more := res.Value.Arr()
-			oldSigs := map[string]bool{}
-			for i := range items {
-				if s, ok := items[i].Map()["sig"]; ok {
-					oldSigs[s.Str()] = true
-				}
+		clickedSigs := map[string]bool{}
+		for i := range items {
+			if s, ok := items[i].Map()["sig"]; ok {
+				clickedSigs[s.Str()] = true
 			}
+		}
+		for pass := 0; pass < 4; pass++ { // 深度上限：防止页面无限生成元素
+			if time.Now().After(deadline) {
+				break
+			}
+			res, err := page.Eval(listClickableJS, cfg.AutoConf.Filter)
+			if err != nil {
+				// 页面可能被导航走了，回起点重新扫
+				backToStart(page, startURL)
+				continue
+			}
+			more := res.Value.Arr()
+			fresh := 0
 			for i := range more {
 				if time.Now().After(deadline) {
 					break
@@ -446,23 +589,44 @@ func Auto(page *rod.Page) []string {
 				if s, ok := m["sig"]; ok {
 					sig = s.Str()
 				}
-				if sig == "" || oldSigs[sig] {
+				if sig == "" || clickedSigs[sig] {
 					continue
 				}
+				clickedSigs[sig] = true
+				fresh++
 				log.Logger.Debugf("auto extra element: %s", sig)
 				_, _ = page.Eval(armMutationJS)
 				if _, err := page.Eval(clickBySigJS, sig); err != nil {
 					backToStart(page, startURL)
 					continue
 				}
-				settleAfterClick(page, maxSettle)
 				collect()
-				oldSigs[sig] = true
+				changed := settleAfterClick(page, maxSettle)
+				collect()
+				// 这个新元素还有反应就多给几轮（它可能是又一层菜单入口）
+				if changed {
+					for r := 1; r < maxRepeat; r++ {
+						if time.Now().After(deadline) {
+							break
+						}
+						_, _ = page.Eval(armMutationJS)
+						if _, err := page.Eval(clickBySigJS, sig); err != nil {
+							break
+						}
+						before := len(hrefList)
+						collect()
+						if len(hrefList) == before {
+							break
+						}
+					}
+				}
+			}
+			// 本轮没有新元素可点，说明已收敛
+			if fresh == 0 {
+				break
 			}
 		}
 	}
-
-
 	// 5. 派发非 click 事件（右键/双击/select/快捷键）。
 	//
 	// 这些入口大多触发 XHR 而不是 DOM 链接，但请求会被流量劫持捕获；
@@ -484,6 +648,28 @@ func Auto(page *rod.Page) []string {
 			backToStart(page, startURL)
 		}
 	}
+
+	// 提交表单。
+	//
+	// 只读 <form action> 拿不到真实方法与参数；
+	// 表单类入口（反馈/订阅/上传/严格校验）要求的就是 POST 请求，
+	// 必须真正提交，请求才会被流量劫持捕获。
+	// 放在交互之后：提交有副作用（跳转），不能打断前面的点击循环。
+	// 等待压到 600ms：提交只是为了让 POST 请求发出去，流量劫持会立即捕获；
+	// 等太久会挤占其他交互的预算（实测等 1.5s 会把 shop 类挤掉 20 多条）。
+	if _, err := page.Eval(armMutationJS); err == nil {
+		if _, err := page.Eval(submitFormsJS,
+			cfg.LoginConf.Username, cfg.LoginConf.Password,
+			cfg.LoginConf.Email, cfg.LoginConf.Phone); err != nil {
+			log.Logger.Debugf("auto submit forms err: %s", err)
+		}
+		_ = settleAfterClick(page, 600*time.Millisecond)
+		collect()
+	}
+
+	// 收尾再跑一次冷路径全量扫描。
+	// 交互过程中新生成的元素可能带着非标准属性的 URL，热路径扫不到，这里补上。
+	collectDeep()
 
 	log.Logger.Debugf("auto collected %d links", len(hrefList))
 	return static.HandlerUrls(hrefList, startURL)

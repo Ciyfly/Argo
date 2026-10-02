@@ -112,11 +112,29 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 		return
 	}
 	var PushUrlWg sync.WaitGroup
+	// 入队函数：优先走 tabPool（并发 100），池关闭/异常时同步直推。
+	//
+	// 必须有同步直推兜底：页面交互（点击/表单提交）耗时可能超过
+	// tab 超时，此时外层会关闭页面并结束本协程，tabPool 被 Release，
+	// 之后 Invoke 全部报 "this pool has been closed"——
+	// Auto 收集到的链接一条都进不了队列（实测一次丢 26 个 interact 链接）。
+	//
+	// 先声明再赋值：闭包要引用 tabPool，而 tabPool 在下一行才创建。
+	var pushURL func(*UrlInfo) bool
 	tabPool, _ := ants.NewPoolWithFunc(100, func(data interface{}) {
 		urlInfo := data.(*UrlInfo)
 		PushUrlQueue(urlInfo)
 		PushUrlWg.Done()
 	})
+	pushURL = func(uif *UrlInfo) bool {
+		if tabPool != nil {
+			if err := tabPool.Invoke(uif); err == nil {
+				return true
+			}
+		}
+		PushUrlQueue(uif)
+		return true
+	}
 	defer tabPool.Release()
 
 	domLoadedChan := make(chan bool, 1)
@@ -203,29 +221,37 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 		}
 		// 执行自动化触发事件 输入 点击等 auto
 		hrefList := inject.Auto(page)
+
 		// auto 触发后 获取下当前url
-		info, err = utils.GetPageInfoByPage(page)
-		var currentUrl = ""
-		if err != nil {
-			log.Logger.Debugf("page timeout:%s  %s", err, uif.Url)
-			tabDone <- true
-			return
-		} else {
-			currentUrl = info.URL
-		}
+		//
+		// 注意顺序：必须先把 Auto 收集到的 hrefList 全部入队，
+		// 再判断页面是否已失效。
+		//
+		// Auto 里的表单提交/点击都可能触发页面跳转，跳转后页面对象失效，
+		// 这里的 GetPageInfoByPage 就会报错。之前是先取信息、失败就直接
+		// return，Auto 辛苦收集到的链接全部被丢弃——实测首页一次就丢了
+		// 26 个 interact 链接（reveal/wizard/menu/tab/lazy/unlock/crumb 全没）。
+		info, infoErr := utils.GetPageInfoByPage(page)
+
 		log.Logger.Debugf("dynamic %s parse count: %d", uif.Url, len(staticUrlList))
-		// 解析demo
+		pushed := 0
 		for _, staticUrl := range hrefList {
-			PushUrlWg.Add(1)
 			data := &UrlInfo{Url: staticUrl, SourceType: "auto js", SourceUrl: uif.Url, Depth: uif.Depth + 1}
-			_ = tabPool.Invoke(data)
+			if pushURL(data) {
+				PushUrlWg.Add(1)
+				pushed++
+			}
 		}
+		log.Logger.Debugf("auto js push: %d/%d", pushed, len(hrefList))
 
 		// 推送下如果 单纯的去修改当前页面url的形式
-		if currentUrl != "" {
+		if infoErr == nil && info != nil && info.URL != "" {
 			PushUrlWg.Add(1)
 			data := &UrlInfo{Url: info.URL, SourceType: "patch", SourceUrl: uif.Url, Depth: uif.Depth + 1}
 			_ = tabPool.Invoke(data)
+		} else if infoErr != nil {
+			log.Logger.Debugf("page invalid after auto: %s %s (但已收集的 %d 条链接照常入队)",
+				infoErr, uif.Url, len(hrefList))
 		}
 		// 所有url提交完成才能结束
 		PushUrlWg.Wait()

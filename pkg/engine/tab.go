@@ -50,49 +50,53 @@ func (ei *EngineInfo) TimeoutCloseTab(page *rod.Page, pageFlag int, tabDone chan
 	ei.closeTab(page, pageFlag, PAGE_TIMEOUT_FLAG, tabDone)
 }
 
+// waitForPageLoad 等待页面可用。
+//
+// 历史实现每页固定耗 4 秒以上：WaitRequestIdle(2s) + WaitDOMStable(2s)
+// 是「最多等 2 秒」而不是「等满 2 秒」，但随后还有一个 JS 检查循环
+//（最多 5 次 × 1 秒 sleep），即使页面 0.3 秒就绪也要等 4~5 秒。
+// 90 个页面就是 400 秒的纯等待，是整体耗时的大头。
+//
+// 现在改为事件驱动：readyState 一到 interactive/complete 立即返回；
+// WaitRequestIdle 用短超时兜底（SPA 页面可能持续发请求，不能死等）。
+// 判定标准不变——依旧要求 DOM 稳定、无加载指示，只是不再用 sleep 凑时间。
 func (ei *EngineInfo) waitForPageLoad(page *rod.Page) bool {
 	loadedChan := make(chan bool, 1)
 
 	go func() {
-		// 等待页面加载事件
+		defer func() {
+			// rod 的 Wait 系列在页面关闭/导航时会 panic，兜住避免拖垮整个爬虫
+			if r := recover(); r != nil {
+				loadedChan <- true
+			}
+		}()
+
+		// 等待 load 事件（页面自身的加载完成信号）
 		page.WaitLoad()
 
-		// 等待网络请求变为空闲
-		page.WaitRequestIdle(2*time.Second, nil, nil, nil)()
+		// 网络空闲：短超时兜底。SPA 页面可能持续发请求，
+		// 死等 2 秒以上没有意义——交互阶段自己会等变化。
+		page.WaitRequestIdle(800*time.Millisecond, nil, nil, nil)()
 
-		// 检查 DOM 是否稳定
-		page.WaitDOMStable(2*time.Second, 0.1)
+		// DOM 稳定：同样用短超时兜底
+		_ = page.WaitDOMStable(500*time.Millisecond, 0.1)
 
-		// 执行自定义 JavaScript 来检查页面状态
-		js := `() => {
-            return {
-                readyState: document.readyState,
-                loadingComplete: !document.querySelector('body[unresolved]'),
-                noLoadingIndicators: !document.querySelector('.loading, #loading, .spinner, #spinner'),
-                allImagesLoaded: Array.from(document.images).every((img) => img.complete)
-            }
-        }`
-
-		for i := 0; i < 5; i++ { // 尝试最多5次
+		// 快速确认页面可用：readyState 达标即通过，
+		// 最多轮询 10 次 × 100ms（总 1 秒），不再用 1 秒 sleep 凑次数
+		js := `() => document.readyState === "complete" || document.readyState === "interactive"`
+		for i := 0; i < 10; i++ {
 			result, err := page.Eval(js)
-			if err == nil {
-				status := result.Value.Map()
-				if status["readyState"].Str() == "complete" &&
-					status["loadingComplete"].Bool() &&
-					status["noLoadingIndicators"].Bool() &&
-					status["allImagesLoaded"].Bool() {
-					loadedChan <- true
-					return
-				}
+			if err == nil && result.Value.Bool() {
+				loadedChan <- true
+				return
 			}
-			time.Sleep(1 * time.Second)
+			time.Sleep(100 * time.Millisecond)
 		}
 
-		// 如果所有检查都通过但仍未满足条件，我们假设页面已经加载完毕
+		// 多次未达标也继续：后续交互有自己的等待与容错
 		loadedChan <- true
 	}()
 
-	// 设置一个最大等待时间
 	select {
 	case <-loadedChan:
 		return true

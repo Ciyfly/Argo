@@ -12,12 +12,12 @@ import (
 func robotsSpider(URL string) (navigationRequests []string) {
 	URL = strings.TrimSuffix(URL, "/")
 	requestURL := fmt.Sprintf("%s/robots.txt", URL)
-	response := req.GetResponse(requestURL)
-	if response == nil || response.StatusCode != http.StatusOK {
+	response := req.GetResponseWithBody(requestURL)
+	if response == nil {
 		return nil
 	}
-	navigationRequests = append(navigationRequests, parseRobotsReader(response)...)
 	defer response.Body.Close()
+	navigationRequests = append(navigationRequests, parseRobotsReader(response)...)
 	return navigationRequests
 }
 

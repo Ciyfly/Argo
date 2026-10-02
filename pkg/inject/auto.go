@@ -38,6 +38,33 @@ function run(){
         console.log("click -> ",lowText)
         node.click();
     }
+
+    // 给输入框赋值
+    // fix: 原先用 node.textContent / node.nodeValue / node.setRangeText 赋值，
+    // 这三个对 input/textarea 都改不了 value（textContent 只影响元素子节点，
+    // setRangeText 只对选中文本生效），所以自动填表实际什么都没填进去。
+    // 必须走原生 value 的 setter，并派发 input/change 事件，
+    // React/Vue 这类框架也是靠覆写 value setter 来感知输入的。
+    function setInputValue(node, value){
+        var proto = node.tagName === "TEXTAREA" ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+        var descriptor = Object.getOwnPropertyDescriptor(proto, "value");
+        if (descriptor && descriptor.set) {
+            descriptor.set.call(node, value);
+        } else {
+            node.value = value;
+        }
+        node.dispatchEvent(new Event("input", {bubbles: true}));
+        node.dispatchEvent(new Event("change", {bubbles: true}));
+        console.log("input -> ", node.type, node.value)
+    }
+
+    // 需要自动填值的输入框类型
+    function isFillableInput(node){
+        if (node.tagName !== "INPUT"){
+            return false
+        }
+        return ["text", "password", "email", "tel"].indexOf(node.type) >= 0
+    }
     
     function treeWalkerFilter(element) {
         if (element.nodeType === Node.ELEMENT_NODE) {
@@ -104,24 +131,16 @@ function run(){
             }
             node.style.color="red";
             // 如果是input 输入的也要先判断是什么类型的然后输入
-            if (node.tagName=="INPUT" &&  node.type=="text" || node.tagName=="INPUT" &&  node.type=="password"  || node.tagName=="INPUT" &&  node.type=="email"  || node.tagName=="INPUT" &&  node.type=="tel"){
+            if (isFillableInput(node)){
                 console.log(node.type)
                 if (node.type=="text"){
-                    node.textContent = username
-                    node.nodeValue = username
-                    node.setRangeText(username)
+                    setInputValue(node, username)
                 }else if(node.type=="password") {
-                    node.textContent = password
-                    node.nodeValue = password
-                    node.setRangeText(password)
+                    setInputValue(node, password)
                 }else if (node.type=="email"){
-                    node.textContent = email
-                    node.nodeValue = email
-                    node.setRangeText(email)
+                    setInputValue(node, email)
                 }else if (node.type=="tel"){
-                    node.textContent = phone
-                    node.nodeValue = phone
-                    node.setRangeText(phone)
+                    setInputValue(node, phone)
                 }
 
             }else if (node.tagName == "A"){
@@ -154,16 +173,22 @@ function run(){
 }   
 `
 
+// renderAutoJs 把配置填充进注入脚本模板。
+// 抽成独立函数，既方便测试校验占位符是否都填对，也避免 Auto() 里内联一大段 Sprintf。
+func renderAutoJs(c *conf.Conf) string {
+	return fmt.Sprintf(
+		AutoJsTemplate,
+		c.LoginConf.Username,
+		c.LoginConf.Password,
+		c.LoginConf.Email,
+		c.LoginConf.Phone,
+		c.AutoConf.Slow,
+		strings.Join(c.AutoConf.Filter, "\", \""))
+}
+
 func Auto(page *rod.Page) []string {
 	hrefList := []string{}
-	content := fmt.Sprintf(
-		AutoJsTemplate,
-		conf.GlobalConfig.LoginConf.Username,
-		conf.GlobalConfig.LoginConf.Password,
-		conf.GlobalConfig.LoginConf.Email,
-		conf.GlobalConfig.LoginConf.Phone,
-		conf.GlobalConfig.AutoConf.Slow,
-		strings.Join(conf.GlobalConfig.AutoConf.Filter, "\", \""))
+	content := renderAutoJs(conf.GlobalConfig)
 	info, err := utils.GetPageInfoByPage(page)
 	if err != nil {
 		return nil

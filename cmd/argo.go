@@ -23,7 +23,8 @@ var Version = "v1.0"
 // 去除go http.head 请求出现的日志
 
 func SetupCloseHandler() {
-	c := make(chan os.Signal)
+	// 有缓冲的 channel：signal.Notify 在信号到来时不应阻塞，否则会丢信号
+	c := make(chan os.Signal, 1)
 	signal.Notify(c, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, os.Interrupt, os.Kill, syscall.SIGKILL)
 	go func() {
 		<-c
@@ -212,6 +213,18 @@ func main() {
 			Usage:    "No storage of req-res strings, saves memory, suitable for large scans.",
 			Category: UseArgsGroup,
 		},
+		&cli.BoolFlag{
+			Name:     "pprof",
+			Value:    false,
+			Usage:    "Enable pprof debug server (off by default). Exposes runtime profiling on --pprofaddr.",
+			Category: DebugArgsGroup,
+		},
+		&cli.StringFlag{
+			Name:     "pprofaddr",
+			Value:    "127.0.0.1:5208",
+			Usage:    "Listen address for the pprof server, only used with --pprof. Defaults to localhost only.",
+			Category: DebugArgsGroup,
+		},
 		&cli.IntFlag{
 			Name:     "maxdepth",
 			Value:    5,
@@ -254,10 +267,16 @@ func RunMain(c *cli.Context) error {
 	conf.LoadConfig()
 	// 合并 命令行与 yaml
 	conf.MergeArgs(c)
-	// 浏览器引擎初始化
-	go func() {
-		http.ListenAndServe("0.0.0.0:5208", nil)
-	}()
+	// pprof 调试服务：默认关闭，需要时用 --pprof 开启
+	// fix: 之前是启动即监听 0.0.0.0:5208 且无法关闭，会把运行时的内存和调用栈信息暴露出去
+	if conf.GlobalConfig.Pprof {
+		go func() {
+			log.Logger.Warnf("pprof enabled: http://%s/debug/pprof/ (do not expose to the public internet)", conf.GlobalConfig.PprofAddr)
+			if err := http.ListenAndServe(conf.GlobalConfig.PprofAddr, nil); err != nil {
+				log.Logger.Errorf("pprof server err: %s", err)
+			}
+		}()
+	}
 	for _, t := range conf.GlobalConfig.TargetList {
 		log.Logger.Infof("target: %s", t)
 		if !req.CheckTarget(t) {

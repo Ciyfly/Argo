@@ -33,7 +33,7 @@ func (ei *EngineInfo) closeTab(page *rod.Page, pageFlag int, timeoutFlage int, t
 	if page != nil {
 		e := page.Close()
 		if e != nil {
-			log.Logger.Debug("page close error: %s ", e.Error())
+			log.Logger.Debugf("page close error: %s", e.Error())
 		}
 	}
 	log.Logger.Debugf("TabLimit  2: %d", len(TabLimit))
@@ -142,11 +142,11 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 			tabDone <- true
 			return
 		}
-		ei.TabCount += 1
+		ei.IncrTabCount()
 		// 404 页面判断
 		if pageFlag == RANDPAGE404_FLAG {
 			html, _ := page.HTML()
-			ei.Page404Vector = vector.HTMLToVector(html)
+			ei.SetPage404Vector(vector.HTMLToVector(html))
 			ei.NormalCloseTab(page, pageFlag, tabDone)
 			return
 		}
@@ -161,10 +161,10 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 		}
 		// 判断页面是不是404页面
 		currentPageVector := vector.HTMLToVector(html)
-		similarity := vector.CosineSimilarity(ei.Page404Vector, currentPageVector)
+		similarity := vector.CosineSimilarity(ei.GetPage404Vector(), currentPageVector)
 		log.Logger.Debugf("similarity: %f", similarity)
 		if similarity > 0.95 {
-			ei.Page404Dict[uif.Url] = 1
+			ei.MarkPage404(uif.Url)
 			log.Logger.Debugf("similarity: %f", similarity)
 			log.Logger.Debugf("404 page: %s", uif.Url)
 			log.Logger.Info("similarity")
@@ -328,7 +328,9 @@ func (ei *EngineInfo) TabWork(ctx context.Context) {
 						<-TabLimit
 					}()
 					log.Logger.Debugf("[ new tab  ]=> %s", uif.Url)
+					// 每个目标开始前清空上一轮的结果，避免多目标时结果串到下一个目标
 					if uif.SourceType == "homePage" {
+						ResetResult()
 						ei.NewTab(uif, HOME_PAGE_FLAG)
 					} else {
 						ei.NewTab(uif, NOT_HOME_PAGE_FLAG)

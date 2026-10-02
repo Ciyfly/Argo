@@ -51,6 +51,68 @@ type EngineInfo struct {
 	Page404Dict        map[string]int
 	Ctx                context.Context
 	Cancel             context.CancelFunc
+
+	// 以下字段会被多个 tab 协程和流量劫持回调协程同时访问。
+	// fix: 之前没有任何同步，并发读写 map 会直接 panic（fatal error: concurrent map read and map write），
+	// TabCount 的 += 也不是原子操作。统一用这把锁保护。
+	mu sync.RWMutex
+}
+
+// IncrTabCount 增加已打开 tab 计数。
+func (ei *EngineInfo) IncrTabCount() {
+	ei.mu.Lock()
+	ei.TabCount++
+	ei.mu.Unlock()
+}
+
+// GetTabCount 读取已打开 tab 计数。
+func (ei *EngineInfo) GetTabCount() int {
+	ei.mu.RLock()
+	defer ei.mu.RUnlock()
+	return ei.TabCount
+}
+
+// SetPage404Vector 记录随机 404 页面的向量特征。
+func (ei *EngineInfo) SetPage404Vector(v vector.Vector) {
+	ei.mu.Lock()
+	ei.Page404Vector = v
+	ei.mu.Unlock()
+}
+
+// GetPage404Vector 读取随机 404 页面的向量特征。
+func (ei *EngineInfo) GetPage404Vector() vector.Vector {
+	ei.mu.RLock()
+	defer ei.mu.RUnlock()
+	return ei.Page404Vector
+}
+
+// SetPage404PageURL 记录随机 404 页面的 URL。
+func (ei *EngineInfo) SetPage404PageURL(u string) {
+	ei.mu.Lock()
+	ei.Page404PageURl = u
+	ei.mu.Unlock()
+}
+
+// GetPage404PageURL 读取随机 404 页面的 URL。
+func (ei *EngineInfo) GetPage404PageURL() string {
+	ei.mu.RLock()
+	defer ei.mu.RUnlock()
+	return ei.Page404PageURl
+}
+
+// MarkPage404 标记某个 URL 已判定为 404 页面。
+func (ei *EngineInfo) MarkPage404(u string) {
+	ei.mu.Lock()
+	ei.Page404Dict[u] = 1
+	ei.mu.Unlock()
+}
+
+// IsPage404 判断某个 URL 是否已被判定为 404 页面。
+func (ei *EngineInfo) IsPage404(u string) bool {
+	ei.mu.RLock()
+	defer ei.mu.RUnlock()
+	_, ok := ei.Page404Dict[u]
+	return ok
 }
 
 type UrlInfo struct {
@@ -203,7 +265,6 @@ func (ei *EngineInfo) Finish() {
 }
 
 func (ei *EngineInfo) Start(ctx context.Context) {
-	var reqClient *http.Client
 	if conf.GlobalConfig.BrowserConf.Proxy != "" {
 		log.Logger.Debugf("proxy: %s", conf.GlobalConfig.BrowserConf.Proxy)
 	}
@@ -241,6 +302,9 @@ func (ei *EngineInfo) Start(ctx context.Context) {
 					saveBytes, _ = ioutil.ReadAll(save)
 				}
 				ctx.Request.Req().Body = body
+				// 这个回调会被多个请求并发调用，reqClient 必须是局部变量，
+				// 否则并发写同一个变量会产生数据竞争。
+				var reqClient *http.Client
 				// proxy
 				if conf.GlobalConfig.BrowserConf.Proxy != "" {
 					reqClient = req.GetProxyClient()
@@ -264,10 +328,10 @@ func (ei *EngineInfo) Start(ctx context.Context) {
 					}
 
 				}
-				if _, ok := ei.Page404Dict[ctx.Request.URL().String()]; ok {
+				if ei.IsPage404(ctx.Request.URL().String()) {
 					return
 				}
-				if ctx.Request.URL().String() == ei.Page404PageURl {
+				if ctx.Request.URL().String() == ei.GetPage404PageURL() {
 					// 随机请求的url 404
 					return
 				}
@@ -315,7 +379,7 @@ func (ei *EngineInfo) Start(ctx context.Context) {
 	// 打开第一个tab页面 这里应该提交url管道任务
 	PushUrlQueue(&UrlInfo{Url: ei.Target, Depth: 0, SourceType: "homePage", SourceUrl: "target"})
 	page404url := ei.Target + "/" + utils.GenRandStr()
-	ei.Page404PageURl = page404url
+	ei.SetPage404PageURL(page404url)
 	// go ei.NewTab(&UrlInfo{Url: page404url, Depth: 0, SourceType: "404", SourceUrl: "404"}, RANDPAGE404_FLAG)
 	PushUrlQueue(&UrlInfo{Url: page404url, Depth: 0, SourceType: "404", SourceUrl: "404"})
 	// 定时清空 about:blank#blocked 当浏览器也退出

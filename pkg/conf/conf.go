@@ -17,7 +17,21 @@ import (
 
 var GlobalConfig *Conf
 
-var defaultYamlConfigStr = `login:
+// defaultYamlConfigStr 是首次运行自动生成的 config.yml 内容。
+//
+// 注意：这里写下的值会被命令行参数的默认值覆盖（详见 MergeArgs），
+// 也就是说想改这些参数，最可靠的方式是在命令行上显式传参。
+var defaultYamlConfigStr = `# Argo 配置文件
+#
+# ⚠️ 重要：命令行参数的默认值会覆盖本文件里的同名配置。
+#
+# 合并规则是「命令行 != 默认值 就覆盖配置文件」，所以：
+#   - 本文件里写了 proxy，但命令行没传 --proxy，proxy 会被清空；
+#   - 本文件里写了 tabtimeout: 30，但命令行没传 --tabtimeout，会被改回默认值 15。
+#
+# 想让某个参数生效，要么每次在命令行显式传参，要么就接受它被默认值覆盖。
+# 加 --debug 运行，日志里会打印实际生效的浏览器配置，方便核对。
+login:
   username: "argo"
   password: "argo123"
   email: "argo@recar.com"
@@ -25,11 +39,11 @@ var defaultYamlConfigStr = `login:
 browser:
   unheadless: false # 开启则界面
   trace: false # 有界面时显示点击了哪些
-  tabcount: 10 # 最多开启多个tab页面
+  tab_count: 10 # 最多开启多个tab页面
   proxy: ""
-  tabtimeout: 15 # tab页面最长时间
-  browsertimeout: 600 # 浏览器运行最长时间
-  maxdepth: 3 # 爬行最大深度
+  tab_timeout: 15 # tab页面最长时间
+  browser_timeout: 600 # 浏览器运行最长时间
+  max_depth: 3 # 爬行最大深度
   user_agent: ""
 auto:
   slow: 1000 # 事件触发的延迟时间
@@ -49,6 +63,9 @@ type Conf struct {
 	Dev              bool
 	NoReqRspStr      bool
 	Quiet            bool
+	// pprof 调试服务，默认关闭
+	Pprof     bool
+	PprofAddr string
 }
 
 // 保存的格式
@@ -135,7 +152,8 @@ func MergeArgs(c *cli.Context) {
 	target := c.String("target")
 	targetsFile := c.String("targetsfile")
 	unheadless := c.Bool("unheadless")
-	trace := c.Bool("entrace")
+	// fix: 原先写成 c.Bool("entrace")，名字拼错导致 --trace 永远读到 false
+	trace := c.Bool("trace")
 	slow := c.Float64("slow")
 	username := c.String("username")
 	password := c.String("password")
@@ -162,6 +180,9 @@ func MergeArgs(c *cli.Context) {
 	// 优化控制
 	norrs := c.Bool("norrs")
 	maxDepth := c.Int("maxdepth")
+	// pprof 调试服务
+	pprof := c.Bool("pprof")
+	pprofAddr := c.String("pprofaddr")
 
 	// 目标
 	if target != "" {
@@ -249,4 +270,21 @@ func MergeArgs(c *cli.Context) {
 	GlobalConfig.NoReqRspStr = norrs
 	GlobalConfig.BrowserConf.MaxDepth = maxDepth
 
+	// pprof 调试服务（默认关闭）
+	GlobalConfig.Pprof = pprof
+	GlobalConfig.PprofAddr = pprofAddr
+
+	// 打印最终生效的浏览器配置，方便核对配置文件是否被命令行默认值覆盖
+	log.Logger.Debugf("effective browser config: unheadless=%v trace=%v tabcount=%d tabtimeout=%d browsertimeout=%d maxdepth=%d proxy=%q chrome=%q remote=%q user_agent=%q",
+		GlobalConfig.BrowserConf.UnHeadless,
+		GlobalConfig.BrowserConf.Trace,
+		GlobalConfig.BrowserConf.TabCount,
+		GlobalConfig.BrowserConf.TabTimeout,
+		GlobalConfig.BrowserConf.BrowserTimeout,
+		GlobalConfig.BrowserConf.MaxDepth,
+		GlobalConfig.BrowserConf.Proxy,
+		GlobalConfig.BrowserConf.Chrome,
+		GlobalConfig.BrowserConf.Remote,
+		GlobalConfig.BrowserConf.UserAgent,
+	)
 }

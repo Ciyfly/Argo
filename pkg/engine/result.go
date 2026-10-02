@@ -11,13 +11,18 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"text/template"
+	"time"
 
 	"github.com/tealeg/xlsx"
 )
 
 // 输出结果
 
+// HtmlData 既是 html 模板的渲染数据，也是传给各格式写文件函数的快照载体。
+// 之所以要快照：结果列表会被后台协程持续追加，写文件时不能再直接遍历全局变量。
 type HtmlData struct {
 	HostName   string
 	DateTime   string
@@ -25,23 +30,104 @@ type HtmlData struct {
 	Count      int
 }
 
-type FormatOutputFunc func(name string)
+type FormatOutputFunc func(name string, data *HtmlData)
 
-var ResultHtmlData *HtmlData
-var ResultList []*PendingUrl
-var ResultQueue chan *PendingUrl
-var FormatMap map[string]FormatOutputFunc
+// ResultList 由 resultHandlerWork 协程写入，被主协程（落盘）读取，
+// 所有访问都必须经过 resultMu，否则并发下会丢结果甚至 panic。
+var (
+	resultMu    sync.Mutex
+	ResultList  []*PendingUrl
+	ResultQueue chan *PendingUrl
+	FormatMap   map[string]FormatOutputFunc
+)
 
-func pushResult(pu *PendingUrl) {
-	ResultQueue <- pu
+// 计数用于退出前确认所有已抓到的结果都已落到 ResultList，避免丢尾巴。
+var (
+	resultPushCount    int64
+	resultHandledCount int64
+)
+
+// SnapshotResult 返回结果列表的副本，避免调用方遍历时被并发写入影响。
+func SnapshotResult() []*PendingUrl {
+	resultMu.Lock()
+	defer resultMu.Unlock()
+	out := make([]*PendingUrl, len(ResultList))
+	copy(out, ResultList)
+	return out
 }
 
-func resultHandlerWork(ctx context.Context) {
+// NewResultSnapshot 生成当前结果的快照，供各格式写文件函数使用。
+func (ei *EngineInfo) NewResultSnapshot() *HtmlData {
+	results := SnapshotResult()
+	return &HtmlData{
+		HostName:   ei.HostName,
+		DateTime:   utils.GetCurrentTime(),
+		ResultList: results,
+		Count:      len(results),
+	}
+}
+
+// resultCount 返回当前已收集的结果条数。
+func resultCount() int {
+	resultMu.Lock()
+	defer resultMu.Unlock()
+	return len(ResultList)
+}
+
+// ResetResult 清空结果列表与计数器。
+//
+// fix: 多个目标时 ResultList 是包级变量，第二个目标会接着第一个目标的结果继续追加，
+// 所以每个目标开始前必须清空，否则前一个目标的 URL 会被重复写入后一个目标的文件。
+func ResetResult() {
+	resultMu.Lock()
+	ResultList = make([]*PendingUrl, 0)
+	resultMu.Unlock()
+	atomic.StoreInt64(&resultPushCount, 0)
+	atomic.StoreInt64(&resultHandledCount, 0)
+}
+
+func pushResult(pu *PendingUrl) {
+	resultMu.Lock()
+	q := ResultQueue
+	resultMu.Unlock()
+	if q == nil {
+		return
+	}
+	// 先确认能入队再计数，否则 FlushResults 会等一个永远不会被消费的计数
+	atomic.AddInt64(&resultPushCount, 1)
+	q <- pu
+}
+
+// FlushResults 等待结果队列排空。
+// fix: 浏览器可能被超时强制关闭，此时还有结果在队列里没被消费，
+// 直接落盘就会丢尾巴；这里等「已入队」追平「已处理」。
+func FlushResults(timeout time.Duration) {
+	resultMu.Lock()
+	q := ResultQueue
+	resultMu.Unlock()
+	if q == nil {
+		return
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if atomic.LoadInt64(&resultHandledCount) >= atomic.LoadInt64(&resultPushCount) && len(q) == 0 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	log.Logger.Warnf("flush results timeout, pending: %d",
+		atomic.LoadInt64(&resultPushCount)-atomic.LoadInt64(&resultHandledCount))
+}
+
+// resultHandlerWork 处理结果队列。
+// fix: 队列作为参数传入而不是读全局变量——每个目标都会重新初始化一次队列，
+// 上一个目标的处理协程如果还在跑并读全局变量，就会和重新赋值产生数据竞争。
+func resultHandlerWork(ctx context.Context, queue chan *PendingUrl) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case data, ok := <-ResultQueue:
+		case data, ok := <-queue:
 			if !ok {
 				return
 			}
@@ -49,9 +135,12 @@ func resultHandlerWork(ctx context.Context) {
 				jsonData, _ := json.Marshal(data)
 				fmt.Println(string(jsonData))
 			} else {
+				resultMu.Lock()
 				ResultList = append(ResultList, data)
+				resultMu.Unlock()
 				log.Logger.Infof("[%s] %s", data.Method, data.URL)
 			}
+			atomic.AddInt64(&resultHandledCount, 1)
 		}
 	}
 
@@ -71,8 +160,10 @@ func writeResult(name string, data []byte) {
 		return
 	}
 }
-func writeResultToJson(name string) {
-	jsonData, err := json.MarshalIndent(ResultList, "", "    ")
+
+// writeResultToJson 等写文件函数统一接收快照，避免遍历时结果列表被并发追加。
+func writeResultToJson(name string, data *HtmlData) {
+	jsonData, err := json.MarshalIndent(data.ResultList, "", "    ")
 	if err != nil {
 		log.Logger.Errorf("save result err: %s", err)
 		return
@@ -80,17 +171,15 @@ func writeResultToJson(name string) {
 	writeResult(name, jsonData)
 }
 
-func writeResultToText(name string) {
+func writeResultToText(name string, data *HtmlData) {
 	txtDate := ""
-	urlCount := 0
-	for _, r := range ResultList {
-		urlCount += 1
+	for _, r := range data.ResultList {
 		txtDate += fmt.Sprintf("[%s]%s\n", r.Method, r.URL)
 	}
 	writeResult(name, []byte(txtDate))
 }
 
-func writeResultToXlsx(name string) {
+func writeResultToXlsx(name string, data *HtmlData) {
 	xlsxFile := xlsx.NewFile()
 	sheet, err := xlsxFile.AddSheet("Argo result")
 	if err != nil {
@@ -109,12 +198,12 @@ func writeResultToXlsx(name string) {
 	sheet.SetColWidth(1, 1, 80)
 	sheet.SetColWidth(2, 2, 80)
 	sheet.SetColWidth(3, 3, 5)
-	for _, data := range ResultList {
+	for _, item := range data.ResultList {
 		values := []string{
-			data.Method,
-			data.URL,
-			data.Data,
-			strconv.Itoa(data.Status),
+			item.Method,
+			item.URL,
+			item.Data,
+			strconv.Itoa(item.Status),
 		}
 
 		row = sheet.AddRow()
@@ -128,7 +217,7 @@ func writeResultToXlsx(name string) {
 
 }
 
-func writeResultToHtml(name string) {
+func writeResultToHtml(name string, data *HtmlData) {
 	t, err := template.New("result").Parse(ResultHtmlTemplate)
 	if err != nil {
 		log.Logger.Errorf("writeResultToHtml err: %s", err)
@@ -139,7 +228,7 @@ func writeResultToHtml(name string) {
 		return
 	}
 	defer resultFile.Close()
-	err = t.Execute(resultFile, ResultHtmlData)
+	err = t.Execute(resultFile, data)
 	if err != nil {
 		log.Logger.Errorf(" %s file creation error: %s", name, err)
 		return
@@ -147,12 +236,16 @@ func writeResultToHtml(name string) {
 }
 
 func (ei *EngineInfo) SaveResult() {
-	log.Logger.Infof("[tab  count] %d", ei.TabCount)
-	if len(ResultList) < 2 {
+	log.Logger.Infof("[tab  count] %d", ei.GetTabCount())
+	// 落盘前先排空结果队列，避免浏览器超时被强关时丢掉还在队列里的结果
+	FlushResults(10 * time.Second)
+	// 先拍快照，后面所有写文件都用这一份，不再直接遍历全局列表
+	snapshot := ei.NewResultSnapshot()
+	if snapshot.Count < 2 {
 		log.Logger.Errorf("No content crawled, you can contact the developer to recar target: %s", ei.HostName)
 		return
 	}
-	log.Logger.Infof("[  result  ] %d", len(ResultList))
+	log.Logger.Infof("[  result  ] %d", snapshot.Count)
 
 	// 如果指定了MergedOutput，优先使用它作为输出文件
 	if conf.GlobalConfig.ResultConf.MergedOutput != "" {
@@ -162,7 +255,7 @@ func (ei *EngineInfo) SaveResult() {
 			// 如果指定了扩展名，只保存对应格式
 			format := strings.TrimPrefix(ext, ".")
 			if _, ok := FormatMap[format]; ok {
-				err := appendToFile(conf.GlobalConfig.ResultConf.MergedOutput, format, ei)
+				err := appendToFile(conf.GlobalConfig.ResultConf.MergedOutput, format, snapshot)
 				if err != nil {
 					log.Logger.Errorf("Failed to save merged result to %s: %v", conf.GlobalConfig.ResultConf.MergedOutput, err)
 				}
@@ -177,18 +270,10 @@ func (ei *EngineInfo) SaveResult() {
 			baseName := path.Base(conf.GlobalConfig.ResultConf.MergedOutput)
 
 			for _, format := range formatList {
-				if format == "html" {
-					ResultHtmlData = &HtmlData{
-						HostName:   ei.HostName,
-						DateTime:   utils.GetCurrentTime(),
-						ResultList: ResultList,
-						Count:      len(ResultList),
-					}
-				}
 				if _, ok := FormatMap[format]; ok {
 					fileName := baseName + "." + format
 					filePath := path.Join(baseDir, fileName)
-					err := appendToFile(filePath, format, ei)
+					err := appendToFile(filePath, format, snapshot)
 					if err != nil {
 						log.Logger.Errorf("Failed to save merged result to %s: %v", filePath, err)
 					}
@@ -222,18 +307,10 @@ func (ei *EngineInfo) SaveResult() {
 
 	formatList := strings.Split(conf.GlobalConfig.ResultConf.Format, ",")
 	for _, format := range formatList {
-		if format == "html" {
-			ResultHtmlData = &HtmlData{
-				HostName:   ei.HostName,
-				DateTime:   utils.GetCurrentTime(),
-				ResultList: ResultList,
-				Count:      len(ResultList),
-			}
-		}
 		if _, ok := FormatMap[format]; ok {
 			fileName := saveName + "." + format
 			filePath := path.Join(ResultOutPutDir, fileName)
-			FormatMap[format](filePath)
+			FormatMap[format](filePath, snapshot)
 			log.Logger.Infof("[   save   ] %s", filePath)
 		} else {
 			log.Logger.Errorf("format not found: %s", format)
@@ -242,16 +319,16 @@ func (ei *EngineInfo) SaveResult() {
 }
 
 // appendToFile 根据不同格式追加内容到文件
-func appendToFile(filePath string, format string, ei *EngineInfo) error {
+func appendToFile(filePath string, format string, data *HtmlData) error {
 	switch format {
 	case "txt":
-		return appendTxtResult(filePath, ResultList)
+		return appendTxtResult(filePath, data.ResultList)
 	case "json":
-		return appendJsonResult(filePath, ResultList)
+		return appendJsonResult(filePath, data.ResultList)
 	case "xlsx":
-		return appendXlsxResult(filePath, ResultList)
+		return appendXlsxResult(filePath, data.ResultList)
 	case "html":
-		return appendHtmlResult(filePath, ResultHtmlData)
+		return appendHtmlResult(filePath, data)
 	default:
 		return fmt.Errorf("unsupported format: %s", format)
 	}
@@ -410,33 +487,36 @@ func appendHtmlResult(filePath string, htmlData *HtmlData) error {
 
 // FormatMap的初始化需要修改为使用新的追加模式函数
 func InitResultHandler(ctx context.Context) {
-	ResultList = make([]*PendingUrl, 0)
-	ResultQueue = make(chan *PendingUrl)
+	ResetResult()
+	queue := make(chan *PendingUrl)
+	resultMu.Lock()
+	ResultQueue = queue
+	resultMu.Unlock()
 	FormatMap = make(map[string]FormatOutputFunc)
-	go resultHandlerWork(ctx)
+	go resultHandlerWork(ctx, queue)
 
 	// 如果使用MergedOutput，使用追加模式的处理函数
 	if conf.GlobalConfig.ResultConf.MergedOutput != "" {
-		FormatMap["json"] = func(name string) {
-			err := appendJsonResult(name, ResultList)
+		FormatMap["json"] = func(name string, data *HtmlData) {
+			err := appendJsonResult(name, data.ResultList)
 			if err != nil {
 				log.Logger.Errorf("Failed to append json result: %v", err)
 			}
 		}
-		FormatMap["txt"] = func(name string) {
-			err := appendTxtResult(name, ResultList)
+		FormatMap["txt"] = func(name string, data *HtmlData) {
+			err := appendTxtResult(name, data.ResultList)
 			if err != nil {
 				log.Logger.Errorf("Failed to append txt result: %v", err)
 			}
 		}
-		FormatMap["xlsx"] = func(name string) {
-			err := appendXlsxResult(name, ResultList)
+		FormatMap["xlsx"] = func(name string, data *HtmlData) {
+			err := appendXlsxResult(name, data.ResultList)
 			if err != nil {
 				log.Logger.Errorf("Failed to append xlsx result: %v", err)
 			}
 		}
-		FormatMap["html"] = func(name string) {
-			err := appendHtmlResult(name, ResultHtmlData)
+		FormatMap["html"] = func(name string, data *HtmlData) {
+			err := appendHtmlResult(name, data)
 			if err != nil {
 				log.Logger.Errorf("Failed to append html result: %v", err)
 			}

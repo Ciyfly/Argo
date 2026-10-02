@@ -24,6 +24,42 @@ Supports the following:
 
 Note: I've exposed many parameters that can be combined to achieve desired effects
 
+## config.yml precedence (important)
+
+Argo first reads `configs/config.yml`, then merges command-line arguments over it. **The merge rule is "override the config file whenever the CLI value differs from the CLI default"**, which means CLI defaults wipe out the matching keys in the config file:
+
+| Value in config.yml | Actual result when the flag is not passed |
+| --- | --- |
+| `proxy: "http://127.0.0.1:8080"` | cleared to `""` |
+| `tab_timeout: 30` | reset to the default `15` |
+| `max_depth: 10` | reset to the default `5` |
+
+So **the reliable way to change browser-related settings is to pass them on the command line**, not to edit the config file.
+
+Running with `--debug` prints an `effective browser config: ...` line showing the values actually in effect.
+
+> `auto.filter` is unaffected - it is controlled by the config file only.
+
+### pprof profiling (off by default)
+
+pprof is Go's built-in runtime profiling interface (memory, CPU, goroutine stacks). It is **off by default** because it exposes internal runtime information.
+
+```shell
+# Nothing is listened on by default
+./argo -t http://testphp.vulnweb.com/
+
+# Enable manually; it listens on localhost only (127.0.0.1:5208)
+./argo -t http://testphp.vulnweb.com/ --pprof
+
+# Custom listen address
+./argo -t http://testphp.vulnweb.com/ --pprof --pprofaddr 127.0.0.1:5309
+```
+
+Once enabled, open `http://127.0.0.1:5208/debug/pprof/` in a browser.
+
+> Note: do not use `--pprofaddr 0.0.0.0:5208` to expose it to the public internet - anyone could pull your heap snapshots and stack traces.
+
+
 ## Installation
 
 You can download the latest version directly from https://github.com/Ciyfly/Argo/releases

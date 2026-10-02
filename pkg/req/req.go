@@ -56,13 +56,21 @@ func CheckTarget(target string) bool {
 		resp.StatusCode == http.StatusGatewayTimeout)
 }
 
-func GetResponse(target string) *http.Response {
+// GetResponseWithBody 发起一次 GET 请求并返回响应，调用方负责关闭 resp.Body。
+// 只有状态码为 200 时才返回响应，其余情况（含请求错误）返回 nil。
+//
+// fix: 这里原先写成了「状态码是 200 就返回 nil」，逻辑正好相反，
+// 导致 robots.txt / sitemap.xml 的解析永远拿不到内容（功能完全失效）。
+func GetResponseWithBody(target string) *http.Response {
 	client, request := getHttpClient(target, "GET")
 	resp, err := client.Do(request)
 	if err != nil {
+		log.Logger.Debugf("get response %s err: %s", target, err)
 		return nil
 	}
-	if resp.StatusCode == http.StatusOK {
+	if resp.StatusCode != http.StatusOK {
+		log.Logger.Debugf("get response %s status: %d", target, resp.StatusCode)
+		resp.Body.Close()
 		return nil
 	}
 	return resp

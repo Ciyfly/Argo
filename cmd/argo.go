@@ -225,6 +225,11 @@ func main() {
 			Usage:    "Listen address for the pprof server, only used with --pprof. Defaults to localhost only.",
 			Category: DebugArgsGroup,
 		},
+		&cli.StringSliceFlag{
+			Name:     "cookie",
+			Usage:    "Preset session cookie(s), repeatable. Format: name=value or name=value@domain. Lets the crawler reach pages behind login (member/admin areas).",
+			Category: ConfigArgsGroup,
+		},
 		&cli.IntFlag{
 			Name:     "maxdepth",
 			Value:    5,

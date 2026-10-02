@@ -66,6 +66,10 @@ type Conf struct {
 	// pprof 调试服务，默认关闭
 	Pprof     bool
 	PprofAddr string
+	// Cookies 预置会话 Cookie，格式 name=value 或 name=value@domain。
+	// 浏览器启动后注入，之后页面导航/XHR/表单提交全会带上——
+	// 登录后才能访问的入口（会员区、管理后台）靠这个才能被发现。
+	Cookies []string
 }
 
 // 保存的格式
@@ -188,6 +192,8 @@ func MergeArgs(c *cli.Context) {
 	// pprof 调试服务
 	pprof := c.Bool("pprof")
 	pprofAddr := c.String("pprofaddr")
+	// 预置会话 Cookie（可重复传）
+	cookies := c.StringSlice("cookie")
 
 	// 目标
 	if target != "" {
@@ -278,6 +284,7 @@ func MergeArgs(c *cli.Context) {
 	// pprof 调试服务（默认关闭）
 	GlobalConfig.Pprof = pprof
 	GlobalConfig.PprofAddr = pprofAddr
+	GlobalConfig.Cookies = cookies
 
 	// 打印最终生效的浏览器配置，方便核对配置文件是否被命令行默认值覆盖
 	log.Logger.Debugf("effective browser config: unheadless=%v trace=%v tabcount=%d tabtimeout=%d browsertimeout=%d maxdepth=%d proxy=%q chrome=%q remote=%q user_agent=%q",

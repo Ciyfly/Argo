@@ -153,6 +153,61 @@ func InitEngine(ctx context.Context, target string) *EngineInfo {
 	return engineInfo
 }
 
+// parseCookies 把命令行传入的 Cookie 字符串解析成 CDP 需要的结构。
+//
+// 支持两种格式：
+//   name=value               —— 绑定到目标站点的域名
+//   name=value@domain        —— 显式指定域名（如跨域 SSO 场景）
+//
+// 之所以用浏览器层注入（StorageSetCookies）而不是在每个请求头里拼：
+// 注入一次后，页面导航、XHR、表单提交全部自动携带，与会话行为完全一致。
+func parseCookies(raw []string, targetURL string) []*proto.NetworkCookieParam {
+	if len(raw) == 0 {
+		return nil
+	}
+	u, err := url.Parse(targetURL)
+	if err != nil {
+		if log.Logger != nil {
+			log.Logger.Errorf("parse cookies: target url err: %s", err)
+		}
+		return nil
+	}
+	var out []*proto.NetworkCookieParam
+	for _, item := range raw {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		eq := strings.Index(item, "=")
+		if eq <= 0 {
+			if log.Logger != nil {
+				log.Logger.Errorf("cookie format err (want name=value): %s", item)
+			}
+			continue
+		}
+		name := item[:eq]
+		value := item[eq+1:]
+		domain := u.Hostname()
+		// name=value@domain：显式指定域名
+		if at := strings.LastIndex(value, "@"); at >= 0 {
+			domain = value[at+1:]
+			value = value[:at]
+		}
+		out = append(out, &proto.NetworkCookieParam{
+			Name:   name,
+			Value:  value,
+			Domain: domain,
+			Path:   "/",
+			URL:    u.Scheme + "://" + u.Host,
+		})
+		// Logger 可能未初始化（如单元测试直调本函数），防御式判断
+		if log.Logger != nil {
+			log.Logger.Infof("preset cookie: %s (domain=%s)", name, domain)
+		}
+	}
+	return out
+}
+
 func InitBrowser(target string) *EngineInfo {
 	// 初始化
 	browser := rod.New()
@@ -208,6 +263,12 @@ func InitBrowser(target string) *EngineInfo {
 	}
 	browser.NoDefaultDevice().MustIncognito()
 	browser.MustIgnoreCertErrors(true)
+	// 注入预置会话 Cookie（--cookie），让爬虫能进入登录后才能访问的区域
+	if cookies := parseCookies(conf.GlobalConfig.Cookies, target); len(cookies) > 0 {
+		if err := browser.SetCookies(cookies); err != nil {
+			log.Logger.Errorf("set cookies err: %s", err)
+		}
+	}
 	firstPageCloseChan := make(chan bool, 1)
 	monitorChan := make(chan bool, 1)
 	u, _ := url.Parse(target)

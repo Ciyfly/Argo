@@ -1,0 +1,11 @@
+# 统一使用 Unix 行尾（LF），避免 CRLF/LF 混用导致 diff 出现整文件改动
+* text=auto eol=lf
+
+# 二进制文件不做行尾转换
+*.gif binary
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.ico binary
+*.zip binary
+*.gz binary

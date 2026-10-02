@@ -39,7 +39,7 @@ login:
 browser:
   unheadless: false # 开启则界面
   trace: false # 有界面时显示点击了哪些
-  tab_count: 10 # 最多开启多个tab页面
+  tab_count: 16 # 最多开启多个tab页面（实测 4/10/16 检出率不变，16 时速度最快）
   proxy: ""
   tab_timeout: 15 # tab页面最长时间
   browser_timeout: 600 # 浏览器运行最长时间

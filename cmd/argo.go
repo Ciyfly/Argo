@@ -140,7 +140,7 @@ func main() {
 		&cli.IntFlag{
 			Name:     "tabcount",
 			Aliases:  []string{"c"},
-			Value:    10,
+			Value:    16,
 			Usage:    "The maximum number of tab pages that can be opened",
 			Category: ConfigArgsGroup,
 		},

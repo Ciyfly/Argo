@@ -77,8 +77,8 @@ func TestDefaultYamlConfigKeysMatchStructTags(t *testing.T) {
 	}
 
 	// 这几个值故意写成与结构体默认值不同的数字，才能验证是否真的被解析进来
-	if parsed.BrowserConf.TabCount != 10 {
-		t.Errorf("tab_count 未被解析，期望 10，实际 %d（键名可能写成了 tabcount）", parsed.BrowserConf.TabCount)
+	if parsed.BrowserConf.TabCount != 16 {
+		t.Errorf("tab_count 未被解析，期望 16，实际 %d（键名可能写成了 tabcount）", parsed.BrowserConf.TabCount)
 	}
 	if parsed.BrowserConf.TabTimeout != 15 {
 		t.Errorf("tab_timeout 未被解析，期望 15，实际 %d（键名可能写成了 tabtimeout）", parsed.BrowserConf.TabTimeout)

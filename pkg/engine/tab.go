@@ -368,8 +368,11 @@ func (ei *EngineInfo) TabWork(ctx context.Context) {
 				}()
 			}
 		default:
-			log.Logger.Debug("wait sleep 1s")
-			time.Sleep(1 * time.Second)
+			// TabQueue 暂空但令牌可用：短轮询而不是睡 1 秒。
+			// 之前每个任务平均多等 0.5 秒，100 个页面就是 50 秒纯调度延迟；
+			// 而且睡太久会让 tab 池出现「忙的忙死、闲的闲等」的波浪。
+			// 20ms 的空转轮询成本可忽略（无锁、无系统调用）。
+			time.Sleep(20 * time.Millisecond)
 			continue
 		}
 	}

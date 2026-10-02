@@ -102,6 +102,11 @@ type BrowserConf struct {
 type AutoConf struct {
 	Slow   float64  `yaml:"slow"`
 	Filter []string `yaml:"filter"`
+	// MaxClickRepeat 同一个可点击元素最多重复点几次。
+	// 多步流程（向导/解锁/结算）需要反复点同一个按钮才会逐步放出后续链接。
+	MaxClickRepeat int `yaml:"max_click_repeat"`
+	// ShortcutKey 要模拟的键盘快捷键，默认 Ctrl+Shift+S。
+	ShortcutKey string `yaml:"shortcut_key"`
 }
 
 func readYamlConfig(configFile string) {

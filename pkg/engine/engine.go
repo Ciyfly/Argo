@@ -156,8 +156,9 @@ func InitEngine(ctx context.Context, target string) *EngineInfo {
 // parseCookies 把命令行传入的 Cookie 字符串解析成 CDP 需要的结构。
 //
 // 支持两种格式：
-//   name=value               —— 绑定到目标站点的域名
-//   name=value@domain        —— 显式指定域名（如跨域 SSO 场景）
+//
+//	name=value               —— 绑定到目标站点的域名
+//	name=value@domain        —— 显式指定域名（如跨域 SSO 场景）
 //
 // 之所以用浏览器层注入（StorageSetCookies）而不是在每个请求头里拼：
 // 注入一次后，页面导航、XHR、表单提交全部自动携带，与会话行为完全一致。

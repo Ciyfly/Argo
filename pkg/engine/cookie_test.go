@@ -9,11 +9,11 @@ import "testing"
 func TestParseCookies(t *testing.T) {
 	target := "https://example.com/path"
 	raw := []string{
-		"session=abc123",                     // 默认绑目标域名
-		"token=xyz@auth.example.com",         // 显式域名
-		"bad-format",                         // 非法：无 =，应跳过
-		"",                                   // 空串，应跳过
-		"  spaced = spaced value  ",          // 前后空白
+		"session=abc123",             // 默认绑目标域名
+		"token=xyz@auth.example.com", // 显式域名
+		"bad-format",                 // 非法：无 =，应跳过
+		"",                           // 空串，应跳过
+		"  spaced = spaced value  ",  // 前后空白
 	}
 	cs := parseCookies(raw, target)
 	if len(cs) != 3 {

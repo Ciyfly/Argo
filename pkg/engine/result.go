@@ -82,12 +82,20 @@ func resultCount() int {
 //
 // fix: 多个目标时 ResultList 是包级变量，第二个目标会接着第一个目标的结果继续追加，
 // 所以每个目标开始前必须清空，否则前一个目标的 URL 会被重复写入后一个目标的文件。
+// resultGen 结果列表的代数：每次 ResetResult（新目标开始）递增，
+// web 控制台据此感知"列表被清空过"，重置增量推送游标。
+var resultGen int64
+
+// ResultGen 返回当前结果代数。
+func ResultGen() int64 { return atomic.LoadInt64(&resultGen) }
+
 func ResetResult() {
 	resultMu.Lock()
 	ResultList = make([]*PendingUrl, 0)
 	resultMu.Unlock()
 	atomic.StoreInt64(&resultPushCount, 0)
 	atomic.StoreInt64(&resultHandledCount, 0)
+	atomic.AddInt64(&resultGen, 1)
 	ResetSecrets()
 }
 

@@ -162,6 +162,48 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 			tabDone <- true
 			return
 		}
+		// web 控制台跟随画面（无 hook 时零开销）
+		if OnTabOpen != nil {
+			OnTabOpen(page)
+		}
+		// 注入策略（两层）：
+		// 1. EvalOnNewDocument（IIFE 脚本源码）——对本 tab 的每次后续导航生效，
+		//    document 起点执行，早于框架脚本：listener 钩子能捕获首屏绑定的
+		//    事件（SPA div @click），蜘蛛随首帧就位。
+		//    注意 rod 该接口按"语句"执行，必须 IIFE 包裹（函数表达式会被丢弃）。
+		// 2. 当前文档兜底：页面以 URL 创建，首个文档不经过 addScript，
+		//    用短重试循环立即注入（上下文一活就装）。
+		_, _ = page.EvalOnNewDocument(inject.ListenerHookScript())
+		spiderWanted := conf.GlobalConfig.BrowserConf.UnHeadless || conf.GlobalConfig.Dev ||
+			conf.GlobalConfig.BrowserConf.WaitLogin || conf.GlobalConfig.WebConsole
+		if spiderWanted {
+			if script := inject.SpiderOverlayScript(); script != "" {
+				_, _ = page.EvalOnNewDocument(script)
+			}
+		}
+		go func() {
+			hookOK, spiderOK := false, !spiderWanted
+			for i := 0; i < 40 && !(hookOK && spiderOK); i++ { // 最多重试 ~6s
+				if !hookOK {
+					if _, err := page.Eval(inject.ListenerHookJS()); err == nil {
+						hookOK = true
+					}
+				}
+				if !spiderOK {
+					if js := inject.SpiderOverlayJS(); js != "" {
+						if _, err := page.Eval(js); err == nil {
+							spiderOK = true
+						}
+					} else {
+						spiderOK = true
+					}
+				}
+				if hookOK && spiderOK {
+					return
+				}
+				time.Sleep(150 * time.Millisecond)
+			}
+		}()
 
 		// 等待页面加载
 		if ei.waitForPageLoad(page) {
@@ -223,6 +265,12 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 			return
 		}
 		log.Logger.Debugf("[ new tab  ]=> %s sourceType: %s sourceUrl: %s", uif.Url, uif.SourceType, uif.SourceUrl)
+		// 有头模式 / web 控制台模式注入蜘蛛爬行动画叠加层（closed shadow，
+		// 对爬取逻辑完全隐形；无头下截图同样能渲染 CSS 动画）
+		if conf.GlobalConfig.BrowserConf.UnHeadless || conf.GlobalConfig.Dev ||
+			conf.GlobalConfig.BrowserConf.WaitLogin || conf.GlobalConfig.WebConsole {
+			inject.InjectSpiderOverlay(page)
+		}
 		// 注入js dom构建前
 		inject.InjectScript(page, 0)
 		// 判断是否需要登录 需要的话进行自动化尝试登录
@@ -541,8 +589,16 @@ func (ei *EngineInfo) PendUrlWork(ctx context.Context) {
 	}
 }
 
-func urlsQueueEmpty() {
+func urlsQueueEmpty(ctx context.Context) {
+	// 必须感知 ctx 取消：StopCurrent 后 PendUrlWork 协程已退出，
+	// 没有消费者排空队列，这里的「等队列空」会变成永久死锁
+	//（实测 web 控制台停止后任务状态永远 running）。
 	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 		if len(UrlsQueue) == 0 {
 			break
 		}

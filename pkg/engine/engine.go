@@ -126,6 +126,43 @@ type UrlInfo struct {
 	Depth      int
 }
 
+// OnTabOpen 在每个新 tab 页面创建成功后被调用（web 控制台用于跟随画面）。
+// 可为 nil。
+var OnTabOpen func(page *rod.Page)
+
+// 当前运行任务的句柄（单任务并发），供 web 控制台停止
+var (
+	currentMu     sync.Mutex
+	currentCancel context.CancelFunc
+	currentEngine *EngineInfo
+)
+
+// StopCurrent 停止当前任务：cancel ctx + 关浏览器（触发 Finish 收尾）。
+// 没有运行中的任务时是空操作。
+func StopCurrent() {
+	currentMu.Lock()
+	cancel := currentCancel
+	eif := currentEngine
+	currentMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if eif != nil {
+		eif.CloseBrowser()
+	}
+}
+
+// RunAsync 启动一次爬取并立即返回，done 在爬取结束后关闭。
+// target 为空或浏览器初始化失败时 done 立即关闭。
+func RunAsync(target string) (done <-chan struct{}) {
+	end := make(chan struct{})
+	go func() {
+		defer close(end)
+		Run(target)
+	}()
+	return end
+}
+
 func Run(target string) {
 	// 断点续爬：记录当前目标；状态加载必须在 InitEngine 之后（UrlsQueue 那时才创建）
 	lastTarget = target
@@ -135,6 +172,16 @@ func Run(target string) {
 		cancel()
 		return
 	}
+	currentMu.Lock()
+	currentCancel = cancel
+	currentEngine = eif
+	currentMu.Unlock()
+	defer func() {
+		currentMu.Lock()
+		currentCancel = nil
+		currentEngine = nil
+		currentMu.Unlock()
+	}()
 	if conf.GlobalConfig.ResumePath != "" {
 		if err := LoadCrawlState(conf.GlobalConfig.ResumePath, target); err != nil {
 			log.Logger.Fatalf("load crawl state %s err: %s", conf.GlobalConfig.ResumePath, err)
@@ -346,7 +393,7 @@ func (ei *EngineInfo) CloseBrowser() {
 
 }
 
-func (ei *EngineInfo) Finish() {
+func (ei *EngineInfo) Finish(ctx context.Context) {
 	// 1. 任务完成 2. 浏览器超时
 	tabOverChan := make(chan bool, 1)
 	go func() {
@@ -355,7 +402,7 @@ func (ei *EngineInfo) Finish() {
 		<-ei.FirstPageCloseChan
 		log.Logger.Debug("------------------------first page over------------------------")
 		// url队列为空 没有新增的url需要测试了
-		urlsQueueEmpty()
+		urlsQueueEmpty(ctx)
 		log.Logger.Debug("------------------------urlsQueueEmpty over------------------------")
 		// tab 的协程都完成了
 		TabWg.Wait()
@@ -551,7 +598,7 @@ func (ei *EngineInfo) Start(ctx context.Context) {
 		select {}
 	}
 	// 结束
-	ei.Finish()
+	ei.Finish(ctx)
 	ei.Launcher.Kill()
 	ei.SaveResult()
 	// 收尾保存断点状态（续爬起点）

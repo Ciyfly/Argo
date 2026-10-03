@@ -174,6 +174,7 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 		// 2. 当前文档兜底：页面以 URL 创建，首个文档不经过 addScript，
 		//    用短重试循环立即注入（上下文一活就装）。
 		_, _ = page.EvalOnNewDocument(inject.ListenerHookScript())
+		_, _ = page.EvalOnNewDocument(inject.StealthScript())
 		spiderWanted := conf.GlobalConfig.BrowserConf.UnHeadless || conf.GlobalConfig.Dev ||
 			conf.GlobalConfig.BrowserConf.WaitLogin || conf.GlobalConfig.WebConsole
 		if spiderWanted {
@@ -186,6 +187,8 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 			for i := 0; i < 40 && !(hookOK && spiderOK); i++ { // 最多重试 ~6s
 				if !hookOK {
 					if _, err := page.Eval(inject.ListenerHookJS()); err == nil {
+						// 反爬伪装同轮带上（同一文档一次性装完）
+						_, _ = page.Eval(inject.StealthScript())
 						hookOK = true
 					}
 				}

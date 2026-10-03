@@ -75,7 +75,18 @@ const listenerHookJS = `(() => {
 	// ---- 页面自杀保护 ----
 	window.close = function () {};
 
-	// ---- 定时器降频：60s（动画/轮询的 DOM 变化噪声源）----
+	// ---- 定时器混合策略（crawlergo 与 katana 哲学的折中）----
+	// setTimeout 一次性延时 → 加速 ×0.2：催熟「3 秒后才触发」的延时入口
+	//（katana 的 speedUp 思路，基准里的 timed 类用例直接受益）
+	// setInterval 循环定时 → 降到 60s：轮询/动画是 DOM 变化噪声源，
+	// 会把交互后的页面变化判定变成永真（crawlergo 思路）
+	const originTimeout = window.setTimeout;
+	window.setTimeout = function () {
+		if (typeof arguments[1] === "number" && arguments[1] > 100) {
+			arguments[1] = Math.max(1, Math.round(arguments[1] * 0.2));
+		}
+		return originTimeout.apply(this, arguments);
+	};
 	const originInterval = window.setInterval;
 	window.setInterval = function () {
 		arguments[1] = 60000;

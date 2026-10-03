@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
+	"github.com/ysmood/gson"
 )
 
 // 可点击元素的选择器。
@@ -294,6 +295,23 @@ func formRulesJSON(cfg conf.FormConf) (string, error) {
 //     （SPA 实测大量入口是 <div @click>，无任何结构特征，选择器永远捞不到）
 //  3. cursor:pointer 计算样式兜底；大 DOM 下计算样式昂贵，超过扫描上限即放弃这一路
 const clickableCollectorSrc = `
+	function argoXPath(el) {
+		// 简化 xpath：id 有则用 id 段，否则逐级 tag[n]
+		if (el.id) { return '//*[@id="' + el.id + '"]'; }
+		const parts = [];
+		let node = el;
+		while (node && node.nodeType === 1) {
+			let idx = 1, sib = node.previousElementSibling;
+			while (sib) { if (sib.tagName === node.tagName) { idx++; } sib = sib.previousElementSibling; }
+			parts.unshift(node.tagName + "[" + idx + "]");
+			if (node.parentElement && node.parentElement.id) {
+				parts.unshift('//*[@id="' + node.parentElement.id + '"]');
+				break;
+			}
+			node = node.parentElement;
+		}
+		return "/" + parts.join("/");
+	}
 	function argoFrames() {
 		// 同源 iframe 的 document 列表（跨源访问 contentDocument 会抛错，跳过）
 		const frames = [document];
@@ -369,7 +387,7 @@ var listClickableJS = fmt.Sprintf(`(filters) => {`+clickableCollectorSrc+`
 		counter[base] = (counter[base] || 0) + 1;
 		const prefix = el.__argoFrame ? ("f" + el.__argoFrame + "|") : "";
 		return { index: i, skip: skip, tag: el.tagName, id: el.id || "",
-		         sig: prefix + base + "|" + counter[base] };
+		         sig: prefix + base + "|" + counter[base], xp: argoXPath(el) };
 	});
 }`, fmt.Sprintf("%q", autoClickableSelector))
 
@@ -383,7 +401,7 @@ var listClickableJS = fmt.Sprintf(`(filters) => {`+clickableCollectorSrc+`
 //   - <a href> ：直接跳转
 //   - <button formaction> ：提交表单并跳转（靶场里真实存在这种元素，
 //     一旦触发，后面所有点击都会落在错误页面上）
-var clickBySigJS = fmt.Sprintf(`async (targetSig) => {`+clickableCollectorSrc+`
+var clickBySigJS = fmt.Sprintf(`async (targetSig, targetXPath) => {`+clickableCollectorSrc+`
 	const nodes = argoClickableNodes(%s);
 	const counter = {};
 	let el = null;
@@ -395,11 +413,39 @@ var clickBySigJS = fmt.Sprintf(`async (targetSig) => {`+clickableCollectorSrc+`
 		const prefix = nodes[i].__argoFrame ? ("f" + nodes[i].__argoFrame + "|") : "";
 		if (prefix + base + "|" + counter[base] === targetSig) { el = nodes[i]; break; }
 	}
+	// 签名未命中：DOM 结构变了（文本改写/重排），按 xpath 兜底反查
+	//（katana 元素快照反查思路；签名为主 xpath 为辅）
+	if (!el && targetXPath) {
+		try {
+			const hit = document.evaluate(targetXPath, document, null, 9, null).singleNodeValue;
+			if (hit && hit.tagName) { el = hit; }
+		} catch (e) {}
+	}
 	if (!el) { return false; }
 	// 蜘蛛动画（有头模式注入时）：爬过去伸腿点中，再执行真实点击；
 	// 无头未注入时 __argoSpider 不存在，直接跳过零开销
+	// 零尺寸/隐藏元素是纯浪费，直接弃（interactable 第一层）
+	try {
+		const r0 = el.getBoundingClientRect();
+		if (r0.width < 2 || r0.height < 2) { return false; }
+	} catch (e) {}
 	// 先滚进视口再取坐标：元素在视口外时，先 tap 后滚动会点在错误位置
 	try { el.scrollIntoView({ block: "center" }); } catch (e) {}
+	// 遮挡处理（katana Interactable 思路的覆盖增强版）：中心点最顶层元素
+	// 不是目标时先点遮挡物（弹窗关闭钮/浮层往往有自己的处理器）再点目标——
+	// JS click 能穿透浮层触发监听，但浮层不处理时目标的可见交互不会发生
+	try {
+		const rc = el.getBoundingClientRect();
+		const cx = rc.left + rc.width / 2, cy = rc.top + rc.height / 2;
+		if (cx >= 0 && cy >= 0 && cx < window.innerWidth && cy < window.innerHeight) {
+			const top = document.elementFromPoint(cx, cy);
+			if (top && top !== el && !el.contains(top) && !top.contains(el)) {
+				if (typeof top.click === "function") { top.click(); } else {
+					top.dispatchEvent(new MouseEvent("click", {bubbles: true, cancelable: true, view: window}));
+				}
+			}
+		}
+	} catch (e) {}
 	// 蜘蛛动画（有头模式注入时）：fire-and-forget——点击立即执行，蜘蛛异步追过去
 	// 表演。动画绝不阻塞交互（实测 await 版本把每页交互拖慢 ~1s/次）；
 	// 无头未注入时 __argoSpider 不存在，直接跳过零开销
@@ -680,6 +726,15 @@ func InteractionBudget() time.Duration {
 	return budget
 }
 
+// sigXPath 取列表项的 xpath 兜底定位（clickBySigJS 第二参数）。
+// items 来自 gson 反序列化（[]interface{}/map[string]interface{}）。
+func sigXPath(items []gson.JSON, i int) string {
+	if i < 0 || i >= len(items) {
+		return ""
+	}
+	return items[i].Get("xp").Str()
+}
+
 // Auto 在页面上做自动化交互，返回发现的 URL。
 //
 // reportProgress 可为 nil；不为 nil 时在页面产生进展（新链接/DOM 变化）时被调用，
@@ -847,9 +902,9 @@ func Auto(page *rod.Page, reportProgress func()) []string {
 	// 第一遍：每个元素保证点一次——所有 tab/菜单挨个轮到；
 	// 第二遍：只对第一遍「有反应」的元素重复点击（多步流程在这里推进）。
 	firstReacted := make(map[string]bool, len(items))
-	clickSig := func(sig string, settle time.Duration) (changed bool, gained int, navAway bool) {
+	clickSig := func(sig, xpath string, settle time.Duration) (changed bool, gained int, navAway bool) {
 		_, _ = page.Eval(armMutationJS)
-		if _, err := page.Eval(clickBySigJS, sig); err != nil {
+		if _, err := page.Eval(clickBySigJS, sig, xpath); err != nil {
 			// 上下文失效 = 点击把页面导航走了，回起点继续下一个
 			log.Logger.Debugf("auto click %s navigated away: %s", sig, err)
 			backToStart(page, startURL)
@@ -882,7 +937,7 @@ func Auto(page *rod.Page, reportProgress func()) []string {
 		if sig == "" {
 			continue
 		}
-		changed, gained, _ := clickSig(sig, maxSettle)
+		changed, gained, _ := clickSig(sig, sigXPath(items, i), maxSettle)
 		firstReacted[sig] = changed || gained > 0
 	}
 
@@ -912,7 +967,7 @@ func Auto(page *rod.Page, reportProgress func()) []string {
 			if time.Until(deadline) < budget*3/10 && round > 2 {
 				break
 			}
-			_, gained, _ := clickSig(sig, maxSettle)
+			_, gained, _ := clickSig(sig, sigXPath(items, i), maxSettle)
 			// 多步流程（解锁/面包屑/问卷/结算）要反复点同一按钮才逐步出链接；
 			// 连续两轮无新链即收（unlock 第 1 轮只更新计数器、第 2 轮出链接，
 			// 所以阈值是 2 不是 1）
@@ -1003,7 +1058,7 @@ func Auto(page *rod.Page, reportProgress func()) []string {
 				fresh++
 				log.Logger.Debugf("auto extra element: %s", sig)
 				_, _ = page.Eval(armMutationJS)
-				if _, err := page.Eval(clickBySigJS, sig); err != nil {
+				if _, err := page.Eval(clickBySigJS, sig, sigXPath(items, i)); err != nil {
 					backToStart(page, startURL)
 					continue
 				}
@@ -1017,7 +1072,7 @@ func Auto(page *rod.Page, reportProgress func()) []string {
 							break
 						}
 						_, _ = page.Eval(armMutationJS)
-						if _, err := page.Eval(clickBySigJS, sig); err != nil {
+						if _, err := page.Eval(clickBySigJS, sig, sigXPath(items, i)); err != nil {
 							break
 						}
 						before := len(hrefList)

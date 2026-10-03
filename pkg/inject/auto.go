@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/go-rod/rod"
+	"github.com/go-rod/rod/lib/proto"
 )
 
 // 可点击元素的选择器。
@@ -118,11 +119,22 @@ var scanLinksJS = `() => {
 	document.querySelectorAll("a[href], area[href], iframe[src], frame[src], form[action]").forEach(function (el) {
 		add(el.getAttribute("href") || el.getAttribute("src") || el.getAttribute("action"));
 	});
+	// javascript: 协议静态提取：href/src 里的跳转代码（如 javascript:location='/x'）
+	// 里的字符串字面量——不执行也能拿到 URL（crawlergo TriggerJavascriptProtocol 同思路）
+	document.querySelectorAll('[href^="javascript:" i], [src^="javascript:" i]').forEach(function (el) {
+		const code = el.getAttribute("href") || el.getAttribute("src") || "";
+		const re = /['"]([^'"]{2,300})['"]/g;
+		let m;
+		while ((m = re.exec(code)) !== null) {
+			const v = m[1];
+			if (v.indexOf("/") >= 0 || /^https?:/i.test(v)) { add(v); }
+		}
+	});
 	return out;
 }`
 
 // routesCollectJS 收集 listener 钩子在源头记录的 SPA 路由变化
-//（pushState/replaceState/hashchange/popstate，不一定出现在 DOM 里）。
+// （pushState/replaceState/hashchange/popstate，不一定出现在 DOM 里）。
 var routesCollectJS = `() => {
 	const out = [];
 	(window.__argoRoutes || []).forEach(function (u) {
@@ -282,14 +294,35 @@ func formRulesJSON(cfg conf.FormConf) (string, error) {
 //     （SPA 实测大量入口是 <div @click>，无任何结构特征，选择器永远捞不到）
 //  3. cursor:pointer 计算样式兜底；大 DOM 下计算样式昂贵，超过扫描上限即放弃这一路
 const clickableCollectorSrc = `
+	function argoFrames() {
+		// 同源 iframe 的 document 列表（跨源访问 contentDocument 会抛错，跳过）
+		const frames = [document];
+		try {
+			document.querySelectorAll("iframe").forEach(function (f, i) {
+				try { if (f.contentDocument) { frames.push(f.contentDocument); } } catch (e) {}
+			});
+		} catch (e) {}
+		return frames;
+	}
 	function argoClickableNodes(selector) {
-		const out = Array.prototype.slice.call(document.querySelectorAll(selector));
+		// 同源 iframe 内的元素同样收集（真实站点 iframe 菜单/表单入口），
+		// sig 前缀 f<idx>| 标记所在 frame 供点击时定位
+		let out = [];
 		let cursorExtra = 0;
+		argoFrames().forEach(function (doc, fIdx) {
+			const base = fIdx === 0 ? out : [];
+			const nodes = Array.prototype.slice.call(doc.querySelectorAll(selector));
+			if (fIdx === 0) {
+				out = nodes;
+			} else {
+				nodes.forEach(function (n) { n.__argoFrame = fIdx; out.push(n); });
+			}
+		});
 		try {
 			const all = document.querySelectorAll("*");
 			for (let i = 0; i < all.length; i++) {
 				const el = all[i];
-				if (el.__argoLsn && el.__argoLsn.indexOf("click") >= 0) {
+				if (el.__argoLsn && el.__argoLsn.indexOf("click") >= 0 && el.__argoFrame === undefined) {
 					out.push(el);
 					continue;
 				}
@@ -334,8 +367,9 @@ var listClickableJS = fmt.Sprintf(`(filters) => {`+clickableCollectorSrc+`
 		try { text = (el.textContent || "").replace(/[0-9]+/g, "#").trim().slice(0, 24); } catch (e) {}
 		const base = el.tagName + "#" + (el.id || "") + "|" + text;
 		counter[base] = (counter[base] || 0) + 1;
+		const prefix = el.__argoFrame ? ("f" + el.__argoFrame + "|") : "";
 		return { index: i, skip: skip, tag: el.tagName, id: el.id || "",
-		         sig: base + "|" + counter[base] };
+		         sig: prefix + base + "|" + counter[base] };
 	});
 }`, fmt.Sprintf("%q", autoClickableSelector))
 
@@ -358,7 +392,8 @@ var clickBySigJS = fmt.Sprintf(`async (targetSig) => {`+clickableCollectorSrc+`
 		try { text = (nodes[i].textContent || "").replace(/[0-9]+/g, "#").trim().slice(0, 24); } catch (e) {}
 		const base = nodes[i].tagName + "#" + (nodes[i].id || "") + "|" + text;
 		counter[base] = (counter[base] || 0) + 1;
-		if (base + "|" + counter[base] === targetSig) { el = nodes[i]; break; }
+		const prefix = nodes[i].__argoFrame ? ("f" + nodes[i].__argoFrame + "|") : "";
+		if (prefix + base + "|" + counter[base] === targetSig) { el = nodes[i]; break; }
 	}
 	if (!el) { return false; }
 	// 蜘蛛动画（有头模式注入时）：爬过去伸腿点中，再执行真实点击；
@@ -504,6 +539,32 @@ var dispatchEventsJS = `async (shortcutKey) => {
 	});
 
 	return found;
+}`
+
+// hoverCandidatesJS 列出值得真实鼠标悬停的元素中心坐标。
+//
+// CSS :hover 展开的菜单用 JS dispatchEvent 触发不了（伪类只有真实输入才生效），
+// 必须走 CDP Input 鼠标移动。候选：绑了 mouseover/mouseenter 的元素（__argoLsn）
+// 加 nav/menu 类容器，封顶 20 个控制成本。
+var hoverCandidatesJS = `() => {
+	const out = [];
+	const seen = new Set();
+	function push(el) {
+		if (out.length >= 20 || seen.has(el)) { return; }
+		try {
+			const r = el.getBoundingClientRect();
+			if (r.width < 2 || r.height < 2) { return; }
+			if (r.left < 0 || r.top < 0 || r.right > window.innerWidth || r.bottom > window.innerHeight) { return; }
+			seen.add(el);
+			out.push({x: r.left + r.width / 2, y: r.top + r.height / 2,
+				tag: el.tagName + (el.id ? "#" + el.id : "")});
+		} catch (e) {}
+	}
+	document.querySelectorAll("nav, [class*=menu], [class*=nav], [class*=dropdown], [class*=drop-down]").forEach(push);
+	document.querySelectorAll("*").forEach(function (el) {
+		if (el.__argoLsn && (el.__argoLsn.indexOf("mouseover") >= 0 || el.__argoLsn.indexOf("mouseenter") >= 0)) { push(el); }
+	});
+	return out;
 }`
 
 // armMutationJS / checkMutationJS 判断点击是否真的让页面发生了变化。
@@ -863,6 +924,36 @@ func Auto(page *rod.Page, reportProgress func()) []string {
 					break
 				}
 			}
+		}
+	}
+
+	// 真实鼠标 hover：CSS :hover 展开的菜单（下拉导航等）JS 事件触发不了，
+	// 用 CDP Input 真鼠标逐个悬停（封顶 20 个），有 DOM 变化就收集。
+	// 放在两遍点击之后：hover 是增强项，不能挤占广度/深度的预算
+	//（实测插在中间会吃掉 8-10s，无 hover 菜单的站点纯亏）
+	if time.Until(deadline) > budget*15/100 {
+		if res, err := page.Eval(hoverCandidatesJS); err == nil {
+			mouse := page.Mouse
+			for _, v := range res.Value.Arr() {
+				if time.Now().After(deadline) {
+					break
+				}
+				m := v.Map()
+				x, y := m["x"].Num(), m["y"].Num()
+				if x <= 0 || y <= 0 {
+					continue
+				}
+				_, _ = page.Eval(armMutationJS)
+				if err := mouse.MoveTo(proto.Point{X: x, Y: y}); err != nil {
+					continue
+				}
+				settleAfterClick(page, 350*time.Millisecond)
+				collect()
+				if navigatedAway(currentURL(page), startURL) {
+					backToStart(page, startURL)
+				}
+			}
+			_ = mouse
 		}
 	}
 

@@ -31,7 +31,6 @@ var NormalizeationPendUrlMap map[string]int
 // 只对同一模式限制总条数，兼顾「不丢页面」与「不无限翻」。
 var (
 	normalizePatternCount map[string]int
-	normalizePatternSeen  map[string]bool
 )
 
 // maxURLsPerPattern 同一泛化模式最多允许出现的不同 URL 数。
@@ -58,7 +57,6 @@ func InitNormalize(ctx context.Context) {
 	NormalizeationResultMap = make(map[string]int)
 	NormalizeationPendUrlMap = make(map[string]int)
 	normalizePatternCount = make(map[string]int)
-	normalizePatternSeen = make(map[string]bool)
 	NormalizeCloseChanFlag = false
 	go normalizeWork(ctx)
 }

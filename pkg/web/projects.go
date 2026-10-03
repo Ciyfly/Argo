@@ -277,7 +277,11 @@ func (m *runManager) runLoop(projectID string) {
 
 		// 表单参数写回全局配置（engine.Run 读 GlobalConfig）
 		opts := m.store.get(projectID).Params
-		conf.GlobalConfig.BrowserConf.MaxDepth = opts.MaxDepth
+		// 0 视为未填（API 直建项目可能不带 params），保留配置值而不是把深度压成 0
+		// ——maxdepth 为 0 时 depth 过滤会只留首页，整个目标白跑
+		if opts.MaxDepth > 0 {
+			conf.GlobalConfig.BrowserConf.MaxDepth = opts.MaxDepth
+		}
 		if opts.TabCount > 0 {
 			conf.GlobalConfig.BrowserConf.TabCount = opts.TabCount
 		}
@@ -286,9 +290,14 @@ func (m *runManager) runLoop(projectID string) {
 		}
 		// web 任务默认不存 req/resp base64：项目结果文件会膨胀到不可用
 		conf.GlobalConfig.NoReqRspStr = true
+		// quiet 模式下 resultHandlerWork 只打印不进 ResultList，
+		// 控制台的实时流/项目结果会全空——web 任务强制关掉，跑完还原
+		quietBackup := conf.GlobalConfig.Quiet
+		conf.GlobalConfig.Quiet = false
 
 		done := engine.RunAsync(target.URL)
 		<-done
+		conf.GlobalConfig.Quiet = quietBackup
 
 		// engine 每目标 ResetResult，快照即本目标增量
 		results := engine.SnapshotResult()

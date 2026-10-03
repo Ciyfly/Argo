@@ -21,4 +21,5 @@
 - [x] Web 控制台 (设计: docs/web-console-design.md + docs/web-projects-design.md，完成 2026-10-03：--web 启动，项目制多目标顺序爬取/结果持久化/三格式导出/URL 实时流/浏览器画面直播含蜘蛛动画)
 - [x] 注入/点击 JS 审计与修复 (审计: docs/inject-audit.md，完成 2026-10-03：EvalOnNewDocument IIFE 修复/DOM0 劫持/SPA 路由源头捕获/window.close 锁/定时器降频/XHR 限次，spa 0.793→0.836)
 - [ ] 注入审计遗留：iframe 交互/真实鼠标 hover 事件/javascript: 静态提取/反爬伪装 (见 docs/inject-audit.md backlog)
+- [~] SPA 登录后动态路由跟进 (调研: docs/spa-crawling-research.md——Crawljax 状态流图/重放机制与三方案实测对照；可落地子项：等价重置/链式模式定向跟随/stripped DOM 状态哈希)
 - [ ] SPA 登录后动态路由跟进 (待立项：oss-comparison.md Top1，spa_auth 0.154→0.8+)

@@ -24,18 +24,23 @@ func processExtractedResponse(responseURL string, contentType string, body []byt
 		Body:        body,
 	}
 	if confExtractEnabled() {
-		input.OnEndpoint = func(endpointURL string) {
+		input.OnEndpoint = func(endpoint extract.Endpoint) {
+			method := endpoint.Method
+			if method == "" {
+				method = http.MethodGet
+			}
 			// JS 里解析出的接口直接记为结果（与 katana 语义一致：
-			// 解析即发现，不需要浏览器真的去请求）
+			// 解析即发现，不需要浏览器真的去请求）；方法取调用写法
+			// （axios.post / fetch 的 method 选项），识别不出按 GET
 			pushpendingNormalizeQueue(&PendingUrl{
-				URL:     endpointURL,
-				Method:  http.MethodGet,
+				URL:     endpoint.URL,
+				Method:  method,
 				Headers: http.Header{},
 			})
 			// 只有文档类地址才值得开 tab 继续扩散链接，
 			// 纯 API 接口开 tab 只会烧浏览器预算
-			if extract.IsDocumentURL(endpointURL) {
-				PushUrlQueue(&UrlInfo{Url: endpointURL, SourceType: "js extract", SourceUrl: responseURL, Depth: 0})
+			if extract.IsDocumentURL(endpoint.URL) {
+				PushUrlQueue(&UrlInfo{Url: endpoint.URL, SourceType: "js extract", SourceUrl: responseURL, Depth: 0})
 			}
 		}
 	}

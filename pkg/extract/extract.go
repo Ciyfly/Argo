@@ -19,8 +19,9 @@ type ResponseInput struct {
 	URL         string
 	ContentType string
 	Body        []byte
-	// OnEndpoint 收到一条从 JS 中提取出的接口绝对 URL（调用方负责入爬取队列）
-	OnEndpoint func(endpointURL string)
+	// OnEndpoint 收到一条从 JS 中提取出的接口（绝对 URL + 调用写法里的方法，
+	// 方法识别不出时为 GET；调用方负责记结果/入爬取队列）
+	OnEndpoint func(endpoint Endpoint)
 	// OnSecret 收到一条密钥命中
 	OnSecret func(finding SecretFinding)
 }

@@ -3,7 +3,7 @@
 规则：每个需求一条，关联设计实现文档；详细子任务在对应设计文档内维护。
 两级同步规则见 `~/.claude/CLAUDE.md` 第 8 节。
 
-- [x] JS 接口提取 + 密钥泄漏检测 (设计: docs/js-extract-design.md，完成 2026-10-02，pikachu 回归一致)
+- [x] JS 接口提取 + 密钥泄漏检测 (设计: docs/js-extract-design.md，完成 2026-10-02，pikachu 回归一致；2026-10-03 追加接口方法识别：POST 3→9，控制台未请求徽标)
 - [x] 限速 / 按 host 限频 / 失败重试 (设计: docs/rate-limit-design.md，完成 2026-10-02，默认 0 不改变行为)
 - [x] Scope 正则化 + 域外结果输出 (设计: docs/scope-control-design.md，完成 2026-10-02，修复子串误匹配)
 - [~] 页面内容相似度去重 (调研: docs/page-similarity-research.md，调研完成待立项)

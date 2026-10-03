@@ -124,3 +124,34 @@ CLI：`--extract` / `--secrets`（bool，默认 true，显式传 false 关闭—
 - [x] conf/cmd 参数贯通 + README 更新 (--extract/--secrets flag、config extract 段、README 用法章节)
 - [x] 靶场回归（pikachu 本地靶场：URL 检出与 HEAD 基线完全一致（136 条 diff 为空）；secrets 无误报）
 - [x] 语义修正：接口「解析即发现」直接记结果，仅文档类地址开 tab (crawl_range 基线实测首版把 /api/* 全量入队会烧爆浏览器预算、classic 跌到 0.383；修正后 0.564、spa 0.679，详见 docs/crawl-range-baseline.md)
+
+## 追加：接口方法识别（2026-10-03）
+
+背景：实测 web 控制台结果里 POST 几乎为零（438 条仅 3 条）。「解析即发现」路径
+（本设计主体）把所有 JS 提取接口一律记 GET——但 `axios.post('/x')`、
+`fetch('/x',{method:'POST'})`、路由表 `{method:"POST",path:"/x"}` 里方法信息是现成的，被丢掉了。
+
+设计（全部内容驱动、通用）：
+
+- `ExtractAPIPaths` 返回值从 `[]string` 改为 `[]Endpoint{URL, Method}`；
+  方法来源四类正则，识别不出按 GET（浏览器默认）：
+  1. verb 调用：`axios.post/$.put(...)` —— 动词即方法
+  2. fetch 选项：`fetch('/x', {method:'POST'})`
+  3. 路由表/接口配置表：`{method:"POST",path:"/x"}` 与 `{url:"/x",method:"post"}` 两种属性顺序
+     （实测靶场 bundle 用此写法，真实业务的路由表同样常见）
+  4. 纯字符串路径/裸 fetch：GET
+- 同一路径多处出现用 `preferredMethod` 合并：显式动词优先于 GET，双动词保留先见者（与顺序无关）。
+- `ResponseInput.OnEndpoint` 签名改为收 `Endpoint`；engine 侧 `extract_hook.go` 按识别方法记结果。
+- appBase 变体（SPA 部署前缀）继承同一方法。
+- web 控制台：状态码 0（未真实请求）的条目显示 `未请求` 徽标，与已请求条目区分。
+
+影响范围：`pkg/extract/endpoints.go`、`pkg/extract/extract.go`、`pkg/engine/extract_hook.go`、
+`pkg/web/console.html`；hijack/hybrid/probe 路径不受影响（本来就有真实方法与状态码）。
+去重键含方法（normalizeation(url, method)），同一 URL 的 GET/POST 会各记一条，符合预期。
+
+### 子任务
+
+- [x] Endpoint 结构 + 四类方法识别正则 + preferredMethod 合并 (go test ./pkg/extract/ 通过，含新增方法识别/路由表用例)
+- [x] OnEndpoint 签名贯通 engine (go build ./... 通过)
+- [x] 靶场实测 (192.168.0.130:8765：POST 3→9，新增路由表三条 /api/spa/items/search 等；总数 438 持平)
+- [x] 控制台未请求徽标 (console.html renderUrl：status 0 → `未请求`，样式 .s.nr)

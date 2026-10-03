@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Argo 控制台</title>
+<style>
+:root{
+  --bg:#0b1220;--panel:#101a2b;--panel2:#0d1626;--line:#1d3049;
+  --text:#c9e6f2;--muted:#6f93a8;--cyan:#57e6ff;--cyan-dim:#2aa8c8;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font:14px/1.5 "Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;height:100vh;display:flex;overflow:hidden}
+/* 项目侧栏 */
+#sidebar{width:230px;min-width:230px;border-right:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column}
+#sidebar h1{font-size:15px;letter-spacing:2px;color:var(--cyan);text-shadow:0 0 12px rgba(87,230,255,.5);padding:16px 16px 12px;border-bottom:1px solid var(--line)}
+#plist{flex:1;overflow-y:auto;padding:8px}
+.proj{padding:10px 12px;border-radius:8px;cursor:pointer;margin-bottom:4px;border:1px solid transparent}
+.proj:hover{background:var(--panel2)}
+.proj.active{background:var(--panel2);border-color:var(--cyan-dim)}
+.proj .name{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.proj .meta{font-size:11px;color:var(--muted);margin-top:3px}
+.proj .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:1px}
+.dot.idle{background:#4b6b80}.dot.running{background:var(--cyan);box-shadow:0 0 6px var(--cyan);animation:pulse 1s infinite alternate}
+.dot.done{background:#34d399}.dot.stopped{background:#f59e0b}
+#newBtn{margin:12px;padding:9px;border-radius:8px;background:linear-gradient(135deg,#0e7490,#155e75);border:1px solid var(--cyan-dim);color:#eafcff;font-weight:600;cursor:pointer}
+/* 主区 */
+#main{flex:1;display:flex;flex-direction:column;min-width:0}
+#phead{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap}
+#phead .title{font-size:16px;font-weight:700}
+#pstatus{font-size:11px;padding:2px 10px;border-radius:10px;border:1px solid var(--line);color:var(--muted)}
+#pstatus.running{color:var(--cyan);border-color:var(--cyan-dim);animation:pulse 1.2s infinite alternate}
+#pstatus.done{color:#34d399;border-color:#065f46}
+#pstatus.stopped{color:#f59e0b;border-color:#78350f}
+#toast{position:fixed;top:18px;right:18px;background:var(--panel);border:1px solid var(--cyan-dim);color:#eafcff;padding:10px 18px;border-radius:10px;box-shadow:0 0 18px rgba(87,230,255,.35);display:none;z-index:99;font-size:13px}
+#phead .targets{font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center;flex:1;min-width:200px;flex-wrap:wrap}
+.tdot{padding:2px 8px;border-radius:10px;border:1px solid var(--line);font-size:11px;cursor:default}
+.tdot.pending{color:var(--muted)}
+.tdot.running{color:var(--cyan);border-color:var(--cyan-dim);animation:pulse 1s infinite alternate}
+.tdot.done{color:#34d399;border-color:#065f46}
+.tdot.stopped{color:#f59e0b;border-color:#78350f}
+button{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:7px 12px;font-size:13px;cursor:pointer;transition:.15s;outline:none}
+button.primary{background:linear-gradient(135deg,#0e7490,#155e75);border-color:var(--cyan-dim);color:#eafcff;font-weight:600}
+button.primary:hover{box-shadow:0 0 10px rgba(87,230,255,.35)}
+button.danger{border-color:#7f1d1d;color:#fca5a5}
+button:disabled{opacity:.4;cursor:not-allowed}
+button.loading{opacity:.85;pointer-events:none;position:relative;padding-left:28px}
+button.loading::before{content:'';position:absolute;left:10px;top:50%;width:12px;height:12px;margin-top:-6px;border:2px solid rgba(234,252,255,.35);border-top-color:#9ff1ff;border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+#work{flex:1;display:flex;min-height:0}
+.col{display:flex;flex-direction:column;background:var(--panel2);min-width:0}
+#left{width:42%;min-width:320px;border-right:1px solid var(--line)}
+#right{flex:1}
+.col h3{padding:9px 14px;font-size:11px;letter-spacing:1px;color:var(--muted);border-bottom:1px solid var(--line);text-transform:uppercase;display:flex;justify-content:space-between}
+#urls{flex:1;overflow-y:auto;padding:4px 0}
+.u{padding:4px 14px;font:12px/1.45 ui-monospace,Consolas,monospace;border-left:2px solid transparent;word-break:break-all}
+.u:hover{background:#13233a;border-left-color:var(--cyan-dim)}
+.u .m{color:var(--cyan-dim);margin-right:8px}
+.u .s{color:var(--muted);margin-right:8px}
+.u .s.nr{opacity:.65;font-style:italic}
+#stage{flex:1;display:flex;align-items:center;justify-content:center;padding:10px;position:relative;min-height:0}
+#stage img{max-width:100%;max-height:100%;border:1px solid var(--line);border-radius:8px;box-shadow:0 0 24px rgba(0,0,0,.5);background:#000}
+#stage .empty{color:var(--muted);font-size:13px;text-align:center;line-height:2}
+.dotlive{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--cyan);box-shadow:0 0 8px var(--cyan);animation:pulse 1.2s infinite alternate;margin-right:6px}
+@keyframes pulse{from{opacity:.4}to{opacity:1}}
+#urls::-webkit-scrollbar{width:8px}#plist::-webkit-scrollbar{width:8px}
+#urls::-webkit-scrollbar-thumb,#plist::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
+/* 新建弹层 */
+#dlg{position:fixed;inset:0;background:rgba(4,10,20,.7);display:none;align-items:center;justify-content:center;z-index:50}
+#dlg.show{display:flex}
+#dlg .box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;width:460px;max-width:92vw}
+#dlg h2{font-size:15px;margin-bottom:14px;color:var(--cyan)}
+#dlg label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px}
+#dlg input,#dlg textarea,#dlg select{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:8px 10px;font-size:13px;outline:none;font-family:inherit}
+#dlg textarea{height:90px;resize:vertical;font-family:ui-monospace,Consolas,monospace}
+#dlg input:focus,#dlg textarea:focus{border-color:var(--cyan-dim)}
+#dlg .row{display:flex;gap:8px;margin-top:16px;justify-content:flex-end}
+.paramrow{display:flex;gap:8px}
+.paramrow>div{flex:1}
+</style>
+</head>
+<body>
+<nav id="sidebar">
+  <h1>&#9673; ARGO</h1>
+  <div id="plist"></div>
+  <button id="newBtn">+ 新建项目</button>
+</nav>
+<div id="main">
+  <div id="phead">
+    <span class="title" id="ptitle">选择或创建项目</span>
+    <span id="pstatus"></span>
+    <span class="targets" id="ptargets"></span>
+    <button class="primary" id="startBtn" disabled>启动</button>
+    <button class="danger" id="stopBtn" disabled>停止</button>
+    <button id="expTxt" disabled>导出 txt</button>
+    <button id="expJson" disabled>导出 json</button>
+    <button id="expCsv" disabled>导出 csv</button>
+    <button class="danger" id="delBtn" disabled>删除</button>
+  </div>
+  <div id="work">
+    <section class="col" id="left">
+      <h3><span>爬取结果</span><span id="count">0</span></h3>
+      <div id="urls"><div class="u" style="color:var(--muted)">选择项目后此处显示结果…</div></div>
+    </section>
+    <section class="col" id="right">
+      <h3><span>浏览器画面</span><span><span class="dotlive" style="display:none" id="liveDot"></span><span id="fps"></span></span></h3>
+      <div id="stage">
+        <div class="empty" id="stageEmpty">启动任务后直播浏览器画面<br/>留意那只蜘蛛 &#128375;</div>
+        <img id="stream" style="display:none" alt="browser stream"/>
+      </div>
+    </section>
+  </div>
+</div>
+<div id="toast"></div>
+<div id="dlg">
+  <div class="box">
+    <h2>新建爬取项目</h2>
+    <label>项目名称</label>
+    <input id="fName" placeholder="例如：内网测试站"/>
+    <label>目标（每行一个 URL）</label>
+    <textarea id="fTargets" placeholder="http://target-a.com/&#10;http://target-b.com/"></textarea>
+    <div class="paramrow">
+      <div><label>引擎</label><select id="fEngine"><option value="">headless</option><option value="hybrid">hybrid</option></select></div>
+      <div><label>maxdepth</label><input id="fDepth" type="number" value="4" min="1" max="10"/></div>
+      <div><label>tabcount</label><input id="fTabs" type="number" value="8" min="1" max="32"/></div>
+    </div>
+    <div class="row">
+      <button id="dlgCancel">取消</button>
+      <button class="primary" id="dlgOk">创建</button>
+    </div>
+  </div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+let projects = [], curId = null, urlCount = 0, autoScroll = true, streaming = false;
+
+// ---- URL 列表 ----
+const urlsEl = $('urls');
+urlsEl.addEventListener('scroll', () => {
+  autoScroll = urlsEl.scrollTop + urlsEl.clientHeight >= urlsEl.scrollHeight - 30;
+});
+function renderUrl(method, status, url){
+  const div = document.createElement('div'); div.className = 'u';
+  const m = document.createElement('span'); m.className='m'; m.textContent = method || 'GET';
+  div.appendChild(m);
+  // 状态码 0 = 「解析即发现」的接口（JS 提取，从未真实请求），标注出来与已请求的区分
+  const s = document.createElement('span'); s.className='s' + (status ? '' : ' nr'); s.textContent = status || '未请求';
+  div.appendChild(s);
+  div.appendChild(document.createTextNode(url));
+  urlsEl.appendChild(div);
+}
+function clearUrls(){ urlsEl.innerHTML=''; urlCount=0; $('count').textContent='0'; }
+
+// ---- SSE ----
+const es = new EventSource('/api/results');
+es.addEventListener('reset', e => {
+  const d = JSON.parse(e.data);
+  if (d.project_id === curId) clearUrls();
+});
+es.addEventListener('items', e => {
+  const d = JSON.parse(e.data);
+  if (d.meta.project_id !== curId) return;
+  if (urlCount === 0) urlsEl.innerHTML = '';
+  for (const it of d.items) renderUrl(it.Method, it.Status, it.URL);
+  urlCount += d.items.length;
+  $('count').textContent = urlCount;
+  if (autoScroll) urlsEl.scrollTop = urlsEl.scrollHeight;
+});
+
+// ---- 画面 ----
+function startStream(){
+  if (streaming) return;
+  streaming = true;
+  const img = $('stream');
+  img.style.display='block'; $('stageEmpty').style.display='none';
+  $('liveDot').style.display='inline-block';
+  img.src = '/api/stream?' + Date.now();
+  img.onerror = () => { setTimeout(()=>img.src='/api/stream?'+Date.now(), 1000); };
+}
+
+// ---- 项目列表 ----
+async function loadProjects(){
+  projects = await (await fetch('/api/projects')).json();
+  const el = $('plist'); el.innerHTML = '';
+  for (const p of projects) {
+    const div = document.createElement('div');
+    div.className = 'proj' + (p.id === curId ? ' active' : '');
+    const done = p.targets.filter(t=>t.status==='done').length;
+    div.innerHTML = `<div class="name"><span class="dot ${p.status}"></span>${esc(p.name)}</div>
+      <div class="meta">${p.targets.length} 目标 · ${done}/${p.targets.length} 完成</div>`;
+    div.onclick = () => selectProject(p.id);
+    el.appendChild(div);
+  }
+}
+
+// ---- 项目详情 ----
+let pollTimer = null;
+async function selectProject(id){
+  curId = id;
+  clearUrls();
+  await refreshDetail();
+  loadProjects();
+  const d = detailCache;
+  if (d && d.results) {
+    for (const it of d.results.slice(-500)) renderUrl(it.Method, it.Status, it.URL);
+    urlCount = d.results.length; $('count').textContent = urlCount;
+    urlsEl.scrollTop = urlsEl.scrollHeight;
+  }
+  if (d && d.live) startStream();
+}
+
+let detailCache = null, prevLive = false;
+const statusText = {idle:'空闲', running:'运行中', done:'已完成', stopped:'已停止'};
+function showToast(msg, ms=4000){
+  const t = $('toast'); t.textContent = msg; t.style.display='block';
+  clearTimeout(t._h); t._h = setTimeout(()=>t.style.display='none', ms);
+}
+async function refreshDetail(){
+  if (!curId) return;
+  try {
+    const res = await fetch('/api/projects/' + curId);
+    if (!res.ok) { detailCache = null; return; }
+    const d = await res.json();
+    const wasLive = detailCache && detailCache.live;
+    detailCache = d;
+    const p = d.project;
+    $('ptitle').textContent = p.name;
+    // 状态徽章 + 完成提示：live→false 的跳变是"任务刚结束"
+    const st = $('pstatus');
+    st.textContent = statusText[p.status] || p.status;
+    st.className = p.status;
+    if (wasLive && !d.live) {
+      showToast('✔ 项目已结束：' + (statusText[p.status] || p.status));
+      loadProjects();
+    }
+    const tg = $('ptargets'); tg.innerHTML = '';
+    p.targets.forEach((t, i) => {
+      const s = document.createElement('span');
+      s.className = 'tdot ' + t.status;
+      s.textContent = (i+1) + '. ' + shortUrl(t.url) + (t.status==='done' ? ' ✓' : '');
+      s.title = t.url + ' — ' + t.status;
+      tg.appendChild(s);
+    });
+    const live = d.live;
+    if (!$('startBtn').classList.contains('loading')) {
+      $('startBtn').disabled = live || (p.status === 'done' && p.targets.every(t=>t.status==='done'));
+    }
+    if (!$('stopBtn').classList.contains('loading')) {
+      $('stopBtn').disabled = !live;
+    }
+    $('delBtn').disabled = live;
+    const hasResults = (d.results && d.results.length) || (p.targets||[]).some(t=>t.result_count>0);
+    $('expTxt').disabled = $('expJson').disabled = $('expCsv').disabled = !hasResults && !(d.results&&d.results.length);
+    $('fps').textContent = live ? 'LIVE' : '';
+    if (!live) { $('liveDot').style.display='none'; }
+    else startStream();
+  } catch(e){}
+}
+function shortUrl(u){ try { const x = new URL(u); return x.host + (x.pathname==='/'?'':x.pathname.slice(0,20)); } catch(e){ return u.slice(0,26); } }
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+pollTimer = setInterval(() => { refreshDetail(); loadProjects(); }, 2000);
+
+// ---- 操作 ----
+function setLoading(btn, on, text){
+  btn.classList.toggle('loading', on);
+  btn.disabled = on;
+  if (on) { btn.dataset.orig = btn.textContent; btn.textContent = text; }
+  else if (btn.dataset.orig) { btn.textContent = btn.dataset.orig; }
+}
+async function waitState(check, timeoutMs){
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    await new Promise(r => setTimeout(r, 400));
+    await refreshDetail();
+    if (check()) return true;
+  }
+  return false;
+}
+$('startBtn').onclick = async () => {
+  const btn = $('startBtn');
+  setLoading(btn, true, '启动中…');
+  try {
+    const res = await fetch(`/api/projects/${curId}/start`, {method:'POST'});
+    if (!res.ok) { alert(await res.text()); return; }
+    clearUrls(); startStream();
+    const ok = await waitState(() => detailCache && detailCache.live, 20000);
+    if (!ok) showToast('启动超时，请看项目状态', 5000);
+  } finally { setLoading(btn, false); }
+};
+$('stopBtn').onclick = async () => {
+  const btn = $('stopBtn');
+  setLoading(btn, true, '停止中…');
+  try {
+    await fetch(`/api/projects/${curId}/stop`, {method:'POST'});
+    const ok = await waitState(() => detailCache && !detailCache.live, 60000);
+    showToast(ok ? '已停止' : '停止超时，请稍候', 4000);
+  } finally { setLoading(btn, false); }
+};
+$('delBtn').onclick = async () => {
+  if (!confirm('删除该项目及其结果？')) return;
+  await fetch('/api/projects/' + curId, {method:'DELETE'});
+  curId = null; clearUrls(); urlsEl.innerHTML='<div class="u" style="color:var(--muted)">选择项目后此处显示结果…</div>';
+  $('ptitle').textContent='选择或创建项目'; $('ptargets').innerHTML='';
+  ['startBtn','stopBtn','delBtn','expTxt','expJson','expCsv'].forEach(i=>$(i).disabled=true);
+  loadProjects();
+};
+const exportUrl = fmt => `/api/projects/${curId}/export?format=${fmt}`;
+$('expTxt').onclick = () => location.href = exportUrl('txt');
+$('expJson').onclick = () => location.href = exportUrl('json');
+$('expCsv').onclick = () => location.href = exportUrl('csv');
+
+// ---- 新建弹层 ----
+$('newBtn').onclick = () => { $('dlg').classList.add('show'); $('fName').focus(); };
+$('dlgCancel').onclick = () => $('dlg').classList.remove('show');
+$('dlgOk').onclick = async () => {
+  const targets = $('fTargets').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  const body = {
+    name: $('fName').value.trim(),
+    targets,
+    params: { maxdepth: parseInt($('fDepth').value)||4, tabcount: parseInt($('fTabs').value)||8, engine: $('fEngine').value }
+  };
+  if (!body.name || !targets.length) { alert('名称与目标必填'); return; }
+  const res = await fetch('/api/projects', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if (!res.ok) { alert(await res.text()); return; }
+  $('dlg').classList.remove('show');
+  $('fName').value=''; $('fTargets').value='';
+  await loadProjects();
+  const p = await res.json();
+  selectProject(p.id);
+};
+
+loadProjects();
+</script>
+</body>
+</html>

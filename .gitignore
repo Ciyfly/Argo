@@ -6,4 +6,6 @@ argo
 *.html
 *.py
 .idea
-result
+result!pkg/web/console.html
+
+!pkg/web/console.html

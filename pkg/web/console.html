@@ -53,6 +53,8 @@ button.loading::before{content:'';position:absolute;left:10px;top:50%;width:12px
 #right{flex:1}
 .col h3{padding:9px 14px;font-size:11px;letter-spacing:1px;color:var(--muted);border-bottom:1px solid var(--line);text-transform:uppercase;display:flex;justify-content:space-between}
 #urls{flex:1;overflow-y:auto;padding:4px 0}
+#mstats{padding:5px 14px;font:11px/1.4 ui-monospace,Consolas,monospace;color:var(--muted);border-bottom:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#mstats .gs{color:var(--cyan-dim)} #mstats .ps{color:#f5b46a} #mstats .ns{font-style:italic}
 .u{padding:4px 14px;font:12px/1.45 ui-monospace,Consolas,monospace;border-left:2px solid transparent;word-break:break-all}
 .u:hover{background:#13233a;border-left-color:var(--cyan-dim)}
 .u .m{color:var(--cyan-dim);margin-right:8px}
@@ -100,6 +102,7 @@ button.loading::before{content:'';position:absolute;left:10px;top:50%;width:12px
   <div id="work">
     <section class="col" id="left">
       <h3><span>爬取结果</span><span id="count">0</span></h3>
+      <div id="mstats"></div>
       <div id="urls"><div class="u" style="color:var(--muted)">选择项目后此处显示结果…</div></div>
     </section>
     <section class="col" id="right">
@@ -134,8 +137,21 @@ button.loading::before{content:'';position:absolute;left:10px;top:50%;width:12px
 const $ = id => document.getElementById(id);
 let projects = [], curId = null, urlCount = 0, autoScroll = true, streaming = false;
 
-// ---- URL 列表 ----
+// ---- URL 列表 + 方法统计 ----
 const urlsEl = $('urls');
+let stats = {get:0, post:0, other:0, nr:0};
+function statsReset(){ stats = {get:0, post:0, other:0, nr:0}; }
+function statsAdd(method, status){
+  const m = (method || 'GET').toUpperCase();
+  if (m === 'GET') stats.get++; else if (m === 'POST') stats.post++; else stats.other++;
+  if (!status) stats.nr++; // 状态码 0 = 解析即发现、未真实请求
+}
+function statsRender(){
+  let h = `<span class="gs">GET ${stats.get}</span> · <span class="ps">POST ${stats.post}</span>`;
+  if (stats.other) h += ` · 其他 ${stats.other}`;
+  h += ` · <span class="ns">未请求 ${stats.nr}</span>`;
+  $('mstats').innerHTML = h;
+}
 urlsEl.addEventListener('scroll', () => {
   autoScroll = urlsEl.scrollTop + urlsEl.clientHeight >= urlsEl.scrollHeight - 30;
 });
@@ -147,25 +163,48 @@ function renderUrl(method, status, url){
   const s = document.createElement('span'); s.className='s' + (status ? '' : ' nr'); s.textContent = status || '未请求';
   div.appendChild(s);
   div.appendChild(document.createTextNode(url));
+  statsAdd(method, status);
   urlsEl.appendChild(div);
 }
-function clearUrls(){ urlsEl.innerHTML=''; urlCount=0; $('count').textContent='0'; }
+// 超过该条数只渲染最近的部分（统计仍按全量算），防止几万条时 DOM 卡死
+const maxRenderUrls = 3000;
+function renderResults(items){
+  let shown = items, omitted = 0;
+  if (items.length > maxRenderUrls) { omitted = items.length - maxRenderUrls; shown = items.slice(-maxRenderUrls); }
+  if (omitted) {
+    const tip = document.createElement('div'); tip.className = 'u'; tip.style.color = 'var(--muted)';
+    tip.textContent = `… 前面 ${omitted} 条未渲染（共 ${items.length} 条），完整结果请用导出`;
+    urlsEl.appendChild(tip);
+  }
+  for (const it of shown) renderUrl(it.Method, it.Status, it.URL);
+  // 统计口径与计数一致：按全量结果算，而不是被截断后的渲染集
+  if (omitted) { statsReset(); for (const it of items) statsAdd(it.Method, it.Status); }
+  statsRender();
+}
+function clearUrls(){ urlsEl.innerHTML=''; urlCount=0; $('count').textContent='0'; statsReset(); statsRender(); }
 
-// ---- SSE ----
-const es = new EventSource('/api/results');
-es.addEventListener('reset', e => {
-  const d = JSON.parse(e.data);
-  if (d.project_id === curId) clearUrls();
-});
-es.addEventListener('items', e => {
-  const d = JSON.parse(e.data);
-  if (d.meta.project_id !== curId) return;
-  if (urlCount === 0) urlsEl.innerHTML = '';
-  for (const it of d.items) renderUrl(it.Method, it.Status, it.URL);
-  urlCount += d.items.length;
-  $('count').textContent = urlCount;
-  if (autoScroll) urlsEl.scrollTop = urlsEl.scrollHeight;
-});
+// ---- SSE：连接可重建——运行中切换项目回来时游标已推进，旧连接不会重推
+// 当前目标前半段（store 要等目标结束才落盘），必须重连让服务端从头推一遍 ----
+let es = null;
+function connectSSE(){
+  if (es) es.close();
+  es = new EventSource('/api/results');
+  es.addEventListener('reset', e => {
+    const d = JSON.parse(e.data);
+    if (d.project_id === curId) clearUrls();
+  });
+  es.addEventListener('items', e => {
+    const d = JSON.parse(e.data);
+    if (d.meta.project_id !== curId) return;
+    if (urlCount === 0) urlsEl.innerHTML = '';
+    for (const it of d.items) renderUrl(it.Method, it.Status, it.URL);
+    urlCount += d.items.length;
+    $('count').textContent = urlCount;
+    statsRender();
+    if (autoScroll) urlsEl.scrollTop = urlsEl.scrollHeight;
+  });
+}
+connectSSE();
 
 // ---- 画面 ----
 function startStream(){
@@ -201,12 +240,15 @@ async function selectProject(id){
   await refreshDetail();
   loadProjects();
   const d = detailCache;
-  if (d && d.results) {
-    for (const it of d.results.slice(-500)) renderUrl(it.Method, it.Status, it.URL);
+  if (d && d.results && d.results.length) {
+    // 全量渲染（超大项目只渲染尾部，统计与计数仍按全量）
+    renderResults(d.results);
     urlCount = d.results.length; $('count').textContent = urlCount;
     urlsEl.scrollTop = urlsEl.scrollHeight;
+  } else {
+    urlsEl.innerHTML = '<div class="u" style="color:var(--muted)">暂无结果，启动任务后此处实时显示…</div>';
   }
-  if (d && d.live) startStream();
+  if (d && d.live) { startStream(); connectSSE(); }
 }
 
 let detailCache = null, prevLive = false;

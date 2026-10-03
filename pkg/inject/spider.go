@@ -49,15 +49,15 @@ const spiderOverlayJS = `() => {
 	// legs[i] = {hx,hy 髋, kx,ky 膝, fx,fy 足, phase 步态组}
 	const legDefs = [
 		// 右侧四条（前→后）：膝高抬、足尖落地
-		{hx: 6, hy: -4, kx: 26, ky: -36, fx: 58, fy: -20, phase: 0},
-		{hx: 7, hy: -1, kx: 32, ky: -24, fx: 70, fy: 4, phase: 1},
-		{hx: 6, hy: 2, kx: 28, ky: -4, fx: 62, fy: 28, phase: 0},
-		{hx: 5, hy: 4, kx: 21, ky: 6, fx: 48, fy: 44, phase: 1},
+		{hx: 6, hy: -4, kx: 38, ky: -52, fx: 88, fy: -30, phase: 0},
+		{hx: 7, hy: -1, kx: 46, ky: -34, fx: 104, fy: 6, phase: 1},
+		{hx: 6, hy: 2, kx: 40, ky: -4, fx: 92, fy: 42, phase: 0},
+		{hx: 5, hy: 4, kx: 30, ky: 8, fx: 72, fy: 64, phase: 1},
 		// 左侧四条（x 镜像，步态组交错——四足步态）
-		{hx: -6, hy: -4, kx: -26, ky: -36, fx: -58, fy: -20, phase: 1},
-		{hx: -7, hy: -1, kx: -32, ky: -24, fx: -70, fy: 4, phase: 0},
-		{hx: -6, hy: 2, kx: -28, ky: -4, fx: -62, fy: 28, phase: 1},
-		{hx: -5, hy: 4, kx: -21, ky: 6, fx: -48, fy: 44, phase: 0},
+		{hx: -6, hy: -4, kx: -38, ky: -52, fx: -88, fy: -30, phase: 1},
+		{hx: -7, hy: -1, kx: -46, ky: -34, fx: -104, fy: 6, phase: 0},
+		{hx: -6, hy: 2, kx: -40, ky: -4, fx: -92, fy: 42, phase: 1},
+		{hx: -5, hy: 4, kx: -30, ky: 8, fx: -72, fy: 64, phase: 0},
 	];
 
 	const style = document.createElement("style");
@@ -191,11 +191,15 @@ const spiderOverlayJS = `() => {
 	world.appendChild(taplabel);
 
 	// SVG 需要有尺寸才能渲染：给 0 尺寸 + overflow visible 时 Chrome 会画出来，
-	// 但部分版本裁剪——稳妥起见给一个透明承载尺寸（腿展 ±70/±46，留边）
-	svg.setAttribute("width", "180");
-	svg.setAttribute("height", "130");
-	svg.style.marginLeft = "-90px";
-	svg.style.marginTop = "-72px";
+	// 但部分版本裁剪——稳妥起见给一个透明承载尺寸（腿展 ±104/±68，留边）。
+	// viewBox 原点设在框中心：内容坐标 (0,0)（蜘蛛身体）正好落在 _pos 定位点。
+	// 没有它时 SVG 原点默认在框左上角，蜘蛛整体偏左上（旧版偏 90px 且
+	// 出击线永远够不到点击目标——本注释即该 bug 的修复记录）。
+	svg.setAttribute("viewBox", "-140 -100 280 190");
+	svg.setAttribute("width", "280");
+	svg.setAttribute("height", "190");
+	svg.style.marginLeft = "-140px";
+	svg.style.marginTop = "-100px";
 
 	const pos = {x: Math.max(60, window.innerWidth * 0.6), y: window.innerHeight * 0.72};
 	let walkToken = 0;
@@ -307,7 +311,7 @@ const spiderOverlayJS = `() => {
 		// 目标在视口内才去（视口外元素滚过去看不见，直接点）
 		const inView = x >= 0 && y >= 0 && x <= window.innerWidth && y <= window.innerHeight;
 		const done = inView
-			? moveTo(x - 55, y - 38, 260).then(function () { tapLeg(x, y); })
+			? moveTo(x - 82, y - 52, 260).then(function () { tapLeg(x, y); })
 			: Promise.resolve();
 		return done.then(function () {
 			tapfx.style.left = x + "px";

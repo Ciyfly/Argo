@@ -121,6 +121,19 @@ var scanLinksJS = `() => {
 	return out;
 }`
 
+// routesCollectJS 收集 listener 钩子在源头记录的 SPA 路由变化
+//（pushState/replaceState/hashchange/popstate，不一定出现在 DOM 里）。
+var routesCollectJS = `() => {
+	const out = [];
+	(window.__argoRoutes || []).forEach(function (u) {
+		try {
+			const abs = new URL(String(u), document.baseURI).href;
+			if (abs.indexOf("http") === 0) { out.push(abs); }
+		} catch (e) {}
+	});
+	return out;
+}`
+
 var scanLinksDeepJS = `() => {
 	const out = [];
 	const seen = new Set();
@@ -176,7 +189,7 @@ var scanLinksDeepJS = `() => {
 	return out;
 }`
 
-var submitFormsJS = `(username, password, email, phone, rulesJson) => {` + formFieldMatcherSrc + `
+var submitFormsJS = `async (username, password, email, phone, rulesJson) => {` + formFieldMatcherSrc + `
 	const done = [];
 	let conf = {};
 	try { conf = JSON.parse(rulesJson || "{}") || {}; } catch (e) {}
@@ -216,6 +229,14 @@ var submitFormsJS = `(username, password, email, phone, rulesJson) => {` + formF
 			}
 			fill(el);
 		});
+		// 蜘蛛走位到表单中心再提交（有头模式）
+		if (window.__argoSpider) {
+			try {
+				const r = f.getBoundingClientRect();
+				const act = f.getAttribute("action") || "";
+				window.__argoSpider.tap(r.left + r.width / 2, r.top + r.height / 2, r.width, r.height, "FORM " + act.slice(0, 20));
+			} catch (e) {}
+		}
 		// 优先用 requestSubmit（会跑校验并触发 submit 事件），退回 submit()
 		try {
 			if (typeof f.requestSubmit === "function") { f.requestSubmit(); }
@@ -252,12 +273,45 @@ func formRulesJSON(cfg conf.FormConf) (string, error) {
 	return string(data), nil
 }
 
+// clickableCollectorSrc 可点击元素收集器（拼进 listClickableJS / clickBySigJS 函数体）。
+//
+// 三路来源，按通用信号收敛：
+//  1. 结构选择器（button/[onclick]/[role=*] 等，调用方传入）
+//  2. __argoLsn 标记 —— listener_hook 在 document 起点劫持 addEventListener，
+//     框架（Vue/React）用 addEventListener 绑 click 的 div/span 全在这里被捕获
+//     （SPA 实测大量入口是 <div @click>，无任何结构特征，选择器永远捞不到）
+//  3. cursor:pointer 计算样式兜底；大 DOM 下计算样式昂贵，超过扫描上限即放弃这一路
+const clickableCollectorSrc = `
+	function argoClickableNodes(selector) {
+		const out = Array.prototype.slice.call(document.querySelectorAll(selector));
+		let cursorExtra = 0;
+		try {
+			const all = document.querySelectorAll("*");
+			for (let i = 0; i < all.length; i++) {
+				const el = all[i];
+				if (el.__argoLsn && el.__argoLsn.indexOf("click") >= 0) {
+					out.push(el);
+					continue;
+				}
+				if (i > 1500 || cursorExtra >= 30) { break; } // 噪声封顶：死元素点一轮 ~0.5s，多了烧穿预算
+				const tag = el.tagName;
+				if (tag === "SCRIPT" || tag === "STYLE" || tag === "NOSCRIPT" || tag === "A" || tag === "BUTTON") { continue; }
+				if (!el.offsetParent && tag !== "BODY") { continue; }
+				try {
+					if (window.getComputedStyle(el).cursor === "pointer") { out.push(el); cursorExtra++; }
+				} catch (e) {}
+			}
+		} catch (e) {}
+		return out.filter(function (v, i, a) { return a.indexOf(v) === i; });
+	}
+`
+
 // listClickableJS 列出可点击元素，附带稳定签名与是否应跳过。
 //
 // 签名用于跨轮次识别「这个元素已经点过了」：
 // 每轮重新列举时列表里会包含旧按钮，不排重的话预算全浪费在重复点击上。
-var listClickableJS = fmt.Sprintf(`(filters) => {
-	const nodes = Array.prototype.slice.call(document.querySelectorAll(%s));
+var listClickableJS = fmt.Sprintf(`(filters) => {`+clickableCollectorSrc+`
+	const nodes = argoClickableNodes(%s);
 	const low = (filters || []).map(function (f) { return String(f).toLowerCase(); });
 	const counter = {};
 	return nodes.map(function (el, i) {
@@ -295,8 +349,8 @@ var listClickableJS = fmt.Sprintf(`(filters) => {
 //   - <a href> ：直接跳转
 //   - <button formaction> ：提交表单并跳转（靶场里真实存在这种元素，
 //     一旦触发，后面所有点击都会落在错误页面上）
-var clickBySigJS = fmt.Sprintf(`(targetSig) => {
-	const nodes = Array.prototype.slice.call(document.querySelectorAll(%s));
+var clickBySigJS = fmt.Sprintf(`async (targetSig) => {`+clickableCollectorSrc+`
+	const nodes = argoClickableNodes(%s);
 	const counter = {};
 	let el = null;
 	for (let i = 0; i < nodes.length; i++) {
@@ -307,6 +361,21 @@ var clickBySigJS = fmt.Sprintf(`(targetSig) => {
 		if (base + "|" + counter[base] === targetSig) { el = nodes[i]; break; }
 	}
 	if (!el) { return false; }
+	// 蜘蛛动画（有头模式注入时）：爬过去伸腿点中，再执行真实点击；
+	// 无头未注入时 __argoSpider 不存在，直接跳过零开销
+	// 先滚进视口再取坐标：元素在视口外时，先 tap 后滚动会点在错误位置
+	try { el.scrollIntoView({ block: "center" }); } catch (e) {}
+	// 蜘蛛动画（有头模式注入时）：fire-and-forget——点击立即执行，蜘蛛异步追过去
+	// 表演。动画绝不阻塞交互（实测 await 版本把每页交互拖慢 ~1s/次）；
+	// 无头未注入时 __argoSpider 不存在，直接跳过零开销
+	if (window.__argoSpider) {
+		try {
+			const rect = el.getBoundingClientRect();
+			const label = el.tagName + (el.id ? "#" + el.id : "") +
+				(!el.id && el.textContent ? " \"" + el.textContent.trim().slice(0, 10) + "\"" : "");
+			window.__argoSpider.tap(rect.left + rect.width / 2, rect.top + rect.height / 2, rect.width, rect.height, label);
+		} catch (e) {}
+	}
 	if (el.tagName === "A" && el.hasAttribute("href")) {
 		el.setAttribute("data-argo-href", el.getAttribute("href"));
 		el.removeAttribute("href");
@@ -319,7 +388,6 @@ var clickBySigJS = fmt.Sprintf(`(targetSig) => {
 	if (el.tagName === "BUTTON" && (el.getAttribute("type") || "").toLowerCase() === "submit") {
 		el.setAttribute("type", "button");
 	}
-	try { el.scrollIntoView({ block: "center" }); } catch (e) {}
 	// click() 是 HTMLElement 的方法，SVG / 自定义元素上不存在
 	//（rod 探针实测 svg.click 抛 "is not a function"），统一兜底派发 MouseEvent
 	try {
@@ -338,7 +406,9 @@ var clickBySigJS = fmt.Sprintf(`(targetSig) => {
 // 站点惯用法是「change/右键时清空容器再放新链接」——
 // 全部派发完再收集的话，容器里只剩最后一个事件产生的链接，
 // 之前的全部丢失（实测 3 个 select option 只能收到最后 1 个）。
-var dispatchEventsJS = `(shortcutKey) => {
+//
+// select 派发前有蜘蛛动画联动（async；蜘蛛未注入时直接跳过）。
+var dispatchEventsJS = `async (shortcutKey) => {
 	const found = [];
 	const seen = new Set();
 	function safe(fn) { try { fn(); } catch (e) {} }
@@ -356,7 +426,16 @@ var dispatchEventsJS = `(shortcutKey) => {
 		document.querySelectorAll("a[href]").forEach(function (a) { push(a.getAttribute("href")); });
 	}
 
-	// 右键菜单：常见于弹出隐藏操作入口
+	// 右键菜单：常见于弹出隐藏操作入口。
+	// 蜘蛛只对真正挂了 oncontextmenu 的元素走位点击（宽泛猜测的元素太多，逐个走位太慢）
+	const ctxEls = Array.prototype.slice.call(document.querySelectorAll("[oncontextmenu]"));
+	for (const el of ctxEls) {
+		if (window.__argoSpider) {
+			try { const r = el.getBoundingClientRect(); window.__argoSpider.tap(r.left + r.width / 2, r.top + r.height / 2, r.width, r.height, el.tagName + " ctx/dbl"); } catch (e) {}
+		}
+		safe(function () { el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, view: window })); });
+		harvest();
+	}
 	safe(function () {
 		document.querySelectorAll("body, [id*=ctx], [class*=ctx], [class*=context], [id*=menu], [class*=menu]").forEach(function (el) {
 			safe(function () {
@@ -366,9 +445,17 @@ var dispatchEventsJS = `(shortcutKey) => {
 		});
 	});
 
-	// 双击
+	// 双击：挂了 ondblclick 的元素逐个走位点双击，其余批量派发
+	const dblEls = Array.prototype.slice.call(document.querySelectorAll("[ondblclick]"));
+	for (const el of dblEls) {
+		if (window.__argoSpider) {
+			try { const r = el.getBoundingClientRect(); window.__argoSpider.tap(r.left + r.width / 2, r.top + r.height / 2, r.width, r.height, el.tagName + " ctx/dbl"); } catch (e) {}
+		}
+		safe(function () { el.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true, view: window })); });
+		harvest();
+	}
 	safe(function () {
-		document.querySelectorAll("button, [role=button], [ondblclick]").forEach(function (el) {
+		document.querySelectorAll("button, [role=button]").forEach(function (el) {
 			safe(function () {
 				el.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true, view: window }));
 			});
@@ -378,20 +465,27 @@ var dispatchEventsJS = `(shortcutKey) => {
 
 	// 下拉框：选中每一项、派发 change 后立即收集——
 	// handler 常在 change 里清空容器再放新链接，逐项收集才能全拿到
-	safe(function () {
-		document.querySelectorAll("select").forEach(function (sel) {
-			for (let i = 0; i < sel.options.length; i++) {
-				safe(function () {
-					sel.selectedIndex = i;
-					sel.dispatchEvent(new Event("input", { bubbles: true }));
-					sel.dispatchEvent(new Event("change", { bubbles: true }));
-				});
-				harvest();
-				push(sel.value);
-				push(sel.options[i] && sel.options[i].value);
+	const sels = Array.prototype.slice.call(document.querySelectorAll("select"));
+	for (const sel of sels) {
+		for (let i = 0; i < sel.options.length; i++) {
+			if (window.__argoSpider) {
+				try {
+					const r = sel.getBoundingClientRect();
+					const opt = sel.options[i];
+					const label = "SELECT" + (sel.id ? "#" + sel.id : "") + " \u2192 " + ((opt && (opt.textContent || opt.value)) || "").trim().slice(0, 12);
+					window.__argoSpider.tap(r.left + r.width / 2, r.top + r.height / 2, r.width, r.height, label);
+				} catch (e) {}
 			}
-		});
-	});
+			safe(function () {
+				sel.selectedIndex = i;
+				sel.dispatchEvent(new Event("input", { bubbles: true }));
+				sel.dispatchEvent(new Event("change", { bubbles: true }));
+			});
+			harvest();
+			push(sel.value);
+			push(sel.options[i] && sel.options[i].value);
+		}
+	}
 
 	// 键盘快捷键（默认 Ctrl+Shift+S）
 	safe(function () {
@@ -599,6 +693,18 @@ func Auto(page *rod.Page, reportProgress func()) []string {
 			hrefList = append(hrefList, h)
 			ping()
 		}
+		// SPA 路由源头捕获（listener 钩子记录的路由变化）
+		if res, err := page.Eval(routesCollectJS); err == nil {
+			for _, v := range res.Value.Arr() {
+				h := v.Str()
+				if h == "" || seen[h] {
+					continue
+				}
+				seen[h] = true
+				hrefList = append(hrefList, h)
+				ping()
+			}
+		}
 	}
 
 	collectDeep := func() {
@@ -671,52 +777,89 @@ func Auto(page *rod.Page, reportProgress func()) []string {
 	items := res.Value.Arr()
 	log.Logger.Debugf("auto clickable count: %d", len(items))
 
+	// 两遍制（广度优先，再择深）：
+	//
+	// 单循环深度优先的实测问题：页面上 10 个 tab，第一个 tab 每次点击都触发
+	// DOM 变化（changed=true 永不提前退），maxRepeat 轮点完才轮到第二个，
+	// 预算烧光后面 9 个 tab 从未被点击。
+	//
+	// 第一遍：每个元素保证点一次——所有 tab/菜单挨个轮到；
+	// 第二遍：只对第一遍「有反应」的元素重复点击（多步流程在这里推进）。
+	firstReacted := make(map[string]bool, len(items))
+	clickSig := func(sig string, settle time.Duration) (changed bool, gained int, navAway bool) {
+		_, _ = page.Eval(armMutationJS)
+		if _, err := page.Eval(clickBySigJS, sig); err != nil {
+			// 上下文失效 = 点击把页面导航走了，回起点继续下一个
+			log.Logger.Debugf("auto click %s navigated away: %s", sig, err)
+			backToStart(page, startURL)
+			return false, 0, true
+		}
+		changed = settleAfterClick(page, settle)
+		before := len(hrefList)
+		collect()
+		if navigatedAway(currentURL(page), startURL) {
+			backToStart(page, startURL)
+			return changed, len(hrefList) - before, true
+		}
+		return changed, len(hrefList) - before, false
+	}
+
+	// 第一遍：广度——每个元素一次
 	for i := range items {
 		if time.Now().After(deadline) {
-			log.Logger.Debugf("auto budget exhausted at %d/%d", i, len(items))
+			log.Logger.Debugf("auto budget exhausted at %d/%d (pass1)", i, len(items))
 			break
 		}
-		if skip, ok := items[i].Map()["skip"]; ok && skip.Bool() {
+		m := items[i].Map()
+		if skip, ok := m["skip"]; ok && skip.Bool() {
+			continue
+		}
+		sig := ""
+		if v, ok := m["sig"]; ok {
+			sig = v.Str()
+		}
+		if sig == "" {
+			continue
+		}
+		changed, gained, _ := clickSig(sig, maxSettle)
+		firstReacted[sig] = changed || gained > 0
+	}
+
+	// 第二遍：择深——只重复有反应的元素；剩余预算不足 30% 时不再开新链
+	for i := range items {
+		if time.Now().After(deadline) {
+			log.Logger.Debugf("auto budget exhausted at %d/%d (pass2)", i, len(items))
+			break
+		}
+		m := items[i].Map()
+		if skip, ok := m["skip"]; ok && skip.Bool() {
+			continue
+		}
+		sig := ""
+		if v, ok := m["sig"]; ok {
+			sig = v.Str()
+		}
+		if sig == "" || !firstReacted[sig] {
 			continue
 		}
 		noProgress := 0
-		sig := ""
-		if s, ok := items[i].Map()["sig"]; ok {
-			sig = s.Str()
-		}
-		for round := 0; round < maxRepeat; round++ {
+		for round := 1; round < maxRepeat; round++ {
 			if time.Now().After(deadline) {
 				break
 			}
-			_, _ = page.Eval(armMutationJS)
-			if _, err := page.Eval(clickBySigJS, sig); err != nil {
-				// 上下文失效 = 点击把页面导航走了，回起点继续下一个
-				log.Logger.Debugf("auto click %s navigated away: %s", sig, err)
-				backToStart(page, startURL)
+			// 预算保护：剩余不足 30% 且已推进 2 轮，让位给其它页面
+			if time.Until(deadline) < budget*3/10 && round > 2 {
 				break
 			}
-			changed := settleAfterClick(page, maxSettle)
-			before := len(hrefList)
-			collect()
-			if navigatedAway(currentURL(page), startURL) {
-				log.Logger.Debugf("auto navigated to %s, back to start", currentURL(page))
-				backToStart(page, startURL)
-				break
-			}
-			// 多步流程（解锁/面包屑/问卷/结算）必须点满次数，不能提前退出。
-			//
-			// 实测 unlock 按钮：第 1 次只更新计数器、不出链接，
-			// 第 2 次才出链接。若因「本轮无变化」就 break，这条链就断了
-			// （multi-step 会从 14 掉到 4）。
-			//
-			// 但也不能无限制重复：首页有个元素会持续触发 DOM 变化，
-			// 实测被点了 16 轮，把预算吃光，后面的元素全轮不到。
-			// 所以用「连续无进展」计数来刹车：只要还在出链接就继续。
-			if len(hrefList) > before {
+			_, gained, _ := clickSig(sig, maxSettle)
+			// 多步流程（解锁/面包屑/问卷/结算）要反复点同一按钮才逐步出链接；
+			// 连续两轮无新链即收（unlock 第 1 轮只更新计数器、第 2 轮出链接，
+			// 所以阈值是 2 不是 1）
+			if gained > 0 {
 				noProgress = 0
 			} else {
 				noProgress++
-				if noProgress >= 2 && !changed {
+				if noProgress >= 2 {
 					break
 				}
 			}

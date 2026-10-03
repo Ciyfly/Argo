@@ -52,6 +52,7 @@ auto:
   slow: 1000 # 事件触发的延迟时间
   filter: ["lougout", "登出", "reset"] # 包含这种字符的就不进行触发事件
   tab_idle: 10 # 页面静默多少秒后关闭（还在出新链接就不关），0 用默认 10s
+  spider: true # 有头模式下展示蜘蛛爬行动画（点击元素时蜘蛛爬过去点中它）
 
 scope:
   crawl_subdomains: false # 是否把目标 host 的子域也纳入爬取范围
@@ -94,6 +95,10 @@ type Conf struct {
 	Cookies []string
 	// FuzzConf 常见路径探测
 	FuzzConf FuzzConf
+	// WebConsole 启用内置 web 控制台（--web）
+	WebConsole bool
+	// WebAddr web 控制台监听地址（默认 127.0.0.1:8088）
+	WebAddr string
 	// ResumePath 断点续爬状态文件路径（--resume）
 	ResumePath string
 }
@@ -197,6 +202,8 @@ type AutoConf struct {
 	// TabIdle 页面静默多少秒后关闭（进度驱动超时：有新链接就不算静默）。
 	// 0 表示用默认值 10s。
 	TabIdle int `yaml:"tab_idle"`
+	// Spider 有头模式下注入蜘蛛爬行动画叠加层（纯视觉，closed shadow 不影响爬取）。
+	Spider bool `yaml:"spider"`
 }
 
 func readYamlConfig(configFile string) {
@@ -299,10 +306,12 @@ func MergeArgs(c *cli.Context) {
 	// 输出
 	outputFields := c.String("fields")
 	outputTemplate := c.String("outputtemplate")
-	// 路径探测 / 续爬
+	// 路径探测 / 续爬 / web 控制台
 	fuzzEnable := c.Bool("fuzz")
 	fuzzDict := c.String("fuzzdict")
 	resumePath := c.String("resume")
+	webConsole := c.Bool("web")
+	webAddr := c.String("webaddr")
 
 	// 目标
 	if target != "" {
@@ -406,6 +415,10 @@ func MergeArgs(c *cli.Context) {
 	GlobalConfig.FuzzConf.Enable = fuzzEnable
 	GlobalConfig.FuzzConf.Dict = fuzzDict
 	GlobalConfig.ResumePath = resumePath
+	GlobalConfig.WebConsole = webConsole
+	if webAddr != "" {
+		GlobalConfig.WebAddr = webAddr
+	}
 	// 登录参数
 	if username != GlobalConfig.LoginConf.Username {
 		GlobalConfig.LoginConf.Username = username
@@ -421,6 +434,11 @@ func MergeArgs(c *cli.Context) {
 	tabIdle := c.Int("tabidle")
 	if tabIdle != GlobalConfig.AutoConf.TabIdle {
 		GlobalConfig.AutoConf.TabIdle = tabIdle
+	}
+	// 蜘蛛动画叠加层（默认 true，--spider=false 关闭）
+	spiderOverlay := c.Bool("spider")
+	if spiderOverlay != GlobalConfig.AutoConf.Spider {
+		GlobalConfig.AutoConf.Spider = spiderOverlay
 	}
 	// playback
 	GlobalConfig.PlaybackPath = playback

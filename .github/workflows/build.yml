@@ -4,6 +4,11 @@ on:
   release:
     types: [created]
 
+# release 上传产物需要写权限；GITHUB_TOKEN 随 runner 自动注入，
+# 不再依赖会过期/被撤销的个人 PAT（secrets.TOKEN 曾因 401 导致上传失败）
+permissions:
+  contents: write
+
 jobs:
   build-go-binary:
     runs-on: ubuntu-latest
@@ -28,7 +33,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: wangyoucao577/go-release-action@v1.40
         with:
-          github_token: ${{ secrets.TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           goos: ${{ matrix.goos }}
           goarch: ${{ matrix.goarch }}
           goversion: 1.19

@@ -21,6 +21,8 @@ Supports the following:
 11. Automatic program upgrade support
 12. Support for specifying remote or local browser
 13. Updated to support multiple target crawling with single file output and custom UA specification
+14. JS endpoint extraction with HTTP method detection: `axios.post`/`$.put`, `fetch(url,{method})` and route tables `{method,path}` are recorded with their real verbs, not forced to GET
+15. Built-in web console: project-based multi-target crawling, live result stream, browser view streaming, GET/POST/unrequested stats and POST highlighting
 
 Note: I've exposed many parameters that can be combined to achieve desired effects
 
@@ -268,6 +270,27 @@ HTML output example:
 Excel output example:
 
 ![](imgs/result_excel.jpg)
+
+In the terminal result stream, the `[POST]` token is highlighted in bright magenta
+(GET stays default) so POST endpoints stand out. Entries with no status code are
+"found-on-parse" JS endpoints that were never actually requested.
+
+### Web Console --web
+Built-in web console: create projects (multi-target), start crawls, watch the live
+result stream and the browser view (with the spider animation crawling and tapping
+elements), then export results:
+
+```shell
+./argo --web                 # default http://127.0.0.1:8088/
+./argo --web --webaddr 192.168.0.130:8088   # custom IP:port (LAN access)
+```
+
+- Projects and results persist in `webdata/` next to the binary; survive restarts
+- One-click export to txt / json / csv
+- Stats bar with live GET / POST / unrequested counts; POST entries highlighted
+- SSE live result push; MJPEG browser view (~7fps) following the active tab
+- Single active crawl at a time, stoppable at any moment
+- Listens on localhost only, no auth — do not expose to the public internet
 
 ## Description
 This is an assignment from w8ay's knowledge planet and relates to my recent work. It was designed and implemented based on various experts' foundations. Any issues are welcome through issues or direct contact.

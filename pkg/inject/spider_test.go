@@ -44,13 +44,13 @@ func TestSpiderOverlayIsolation(t *testing.T) {
 		t.Errorf("host 元素应是无内容空壳, outerHTML len=%d", hostInfo)
 	}
 
-	// 2. 蜘蛛动画不触发外层 MutationObserver
-	page.MustEval(armMutationJS)
+	// 2. 蜘蛛动画不影响骨架哈希判定（closed shadow 内的结构不进 visible DOM 骨架）
+	page.MustEval(armStateJS)
 	page.MustEval(`() => window.__argoSpider.moveTo(100, 100, 120)`)
 	time.Sleep(300 * time.Millisecond)
-	mutated := page.MustEval(checkMutationJS).Bool()
+	mutated := page.MustEval(stateSettledJS).Str() != ""
 	if mutated {
-		t.Errorf("蜘蛛移动触发了外层 MutationObserver，会干扰交互后的页面变化判定")
+		t.Errorf("蜘蛛移动影响了骨架哈希判定，会干扰交互后的页面变化判定")
 	}
 
 	// 3. tap 可 resolve 且真实点击生效

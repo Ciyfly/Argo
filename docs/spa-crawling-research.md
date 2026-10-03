@@ -83,3 +83,14 @@ SPA 状态不可 URL 寻址，必须重放事件序列"。我们的 backToStart 
   [stackmatix](https://www.stackmatix.com)
 - [AJAX crawlable 历史（sitepoint）](https://www.sitepoint.com)、
   [Lumar SPA crawling](https://www.lumar.io)、[crawlee.dev](https://crawlee.dev)
+
+## 四项全部落地（2026-10-03 实现 + 实测）
+
+| # | 项目 | 实现 | 实测 |
+|---|---|---|---|
+| ① | 等价重置 | backToStart 优先点击 href≈起点的链接（SPA 同文档路由不重载），找不到再 Navigate | **整场爬取 140s 超时 → 36s 自然完成** |
+| ② | 链式模式跟随 | 点击落空（签名+xpath 都找不到）即回起点恢复视图；路由跳转留在新视图由 pass2 重复点击沿链推进，连续两轮无新路由回起点 | **spa 0.836→0.914（wizard/onboard/checkout 链可走）** |
+| ③ | stripped DOM 骨架哈希 | 标签树骨架（≤5000 节点、深度 14，djb2）判定 changed/same——CSS 动画/定时器改样式不再永真 | 修复 MutationObserver 方案"changed 永真"缺陷 |
+| ④ | JS bundle 双基准路由 | 路由表 path 无部署前缀（Vue Router base）时补按应用根（assets 上一级）解析的变体，错的被 404/预检过滤 | shop/wizard 组路由命中 |
+
+最终：**spa 0.914（开局 0.621，累计 +47%）**，classic 0.940 波动带内，整场 spa 耗时 140s→36s。

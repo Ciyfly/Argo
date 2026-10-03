@@ -45,14 +45,46 @@ func ExtractAPIPaths(content, baseURL string) []string {
 	}
 
 	base, _ := url.Parse(baseURL)
-	results := make([]string, 0, len(candidates))
+	appBase := appRootOf(base)
+	results := make([]string, 0, len(candidates)*2)
 	for candidate := range candidates {
 		if resolved := resolveEndpoint(candidate, base); resolved != "" {
 			results = append(results, resolved)
+			// SPA 路由表写在 JS 里时 path 不含部署前缀（Vue Router base），
+			// 如 JS 位于 /spa/assets/index.js 而路由是 /wizard/step-a——
+			// 直接解析得 /wizard/step-a（404）。补一个按应用根（/spa）解析的
+			// 变体：错的那个会被管线 404/预检过滤，对的命中。
+			if appBase != nil {
+				// 注意不能用 ResolveReference：候选是绝对路径（/x）时
+				// base 的 path 会被整体替换，变体与原值恒等。直接拼接。
+				withBase := appBase.Scheme + "://" + appBase.Host + strings.TrimSuffix(appBase.Path, "/") + candidate
+				if withBase != resolved {
+					results = append(results, withBase)
+				}
+			}
 		}
 	}
 	sort.Strings(results)
 	return results
+}
+
+// appRootOf 推断 SPA 部署根：assets 目录的上一级（/spa/assets/x.js → /spa）。
+// 无 assets 特征时返回 nil（不产生变体）。
+func appRootOf(u *url.URL) *url.URL {
+	if u == nil {
+		return nil
+	}
+	segs := strings.Split(strings.Trim(u.Path, "/"), "/")
+	for i, seg := range segs {
+		if seg == "assets" && i >= 1 {
+			root := *u
+			root.Path = "/" + strings.Join(segs[:i], "/")
+			root.RawQuery = ""
+			root.Fragment = ""
+			return &root
+		}
+	}
+	return nil
 }
 
 // resolveEndpoint 把候选字符串解析成绝对 URL，不合法/不值得爬的返回空。

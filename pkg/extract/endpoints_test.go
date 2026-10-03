@@ -156,3 +156,28 @@ func TestResponseProcessBodyTooLarge(t *testing.T) {
 		t.Errorf("超过大小上限的响应不应提取")
 	}
 }
+
+// 回归测试：SPA 路由表写在 JS bundle 里且 path 不含部署前缀
+// （Vue Router base，如 /spa/assets/index.js 中 path:"/wizard/step-a"），
+// 需补按应用根解析的变体（实测该路径曾整组 404 丢失）。
+func TestExtractAPIPathsWithAppBase(t *testing.T) {
+	js := `{path:"/wizard/step-a"},{path:"/wizard/step-b"},{path:"/api/real"}`
+	got := ExtractAPIPaths(js, "https://a.com/spa/assets/index-abc.js")
+	want := map[string]bool{
+		"https://a.com/wizard/step-a":     false,
+		"https://a.com/wizard/step-b":     false,
+		"https://a.com/spa/wizard/step-a": false,
+		"https://a.com/spa/wizard/step-b": false,
+		"https://a.com/api/real":          false,
+	}
+	for _, u := range got {
+		if _, ok := want[u]; ok {
+			want[u] = true
+		}
+	}
+	for u, found := range want {
+		if !found {
+			t.Errorf("应包含变体 %s，实际: %v", u, got)
+		}
+	}
+}

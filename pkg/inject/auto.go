@@ -613,20 +613,42 @@ var hoverCandidatesJS = `() => {
 	return out;
 }`
 
-// armMutationJS / checkMutationJS 判断点击是否真的让页面发生了变化。
-var armMutationJS = `() => {
-	window.__argoMutated = false;
-	if (window.__argoObserver) { try { window.__argoObserver.disconnect(); } catch (e) {} }
-	try {
-		window.__argoObserver = new MutationObserver(function () { window.__argoMutated = true; });
-		window.__argoObserver.observe(document.documentElement, {
-			subtree: true, childList: true, attributes: true, characterData: true
-		});
-	} catch (e) {}
+// strippedDOMHashSrc 结构骨架哈希（Crawljax stripped DOM 思路的轻量实现）：
+// 只取标签树结构（忽略文本值/样式/易变属性），CSS 动画、定时器改样式都不会
+// 改变哈希——修复"页面有动画则 changed 永真"的问题（MutationObserver 方案的缺陷）。
+const strippedDOMHashSrc = `
+	function argoSkeletonHash() {
+		const out = [];
+		function walk(node, depth) {
+			if (depth > 14 || out.length > 5000) { return; }
+			for (let child = node.firstElementChild; child; child = child.nextElementSibling) {
+				out.push(child.tagName);
+				if (child.id) { out.push("#" + child.id); }
+				walk(child, depth + 1);
+			}
+		}
+		walk(document.body, 0);
+		let h = 5381;
+		const str = out.join(">");
+		for (let i = 0; i < str.length; i++) { h = ((h << 5) + h + str.charCodeAt(i)) | 0; }
+		return h + ":" + out.length;
+	}
+`
+
+// armStateJS 点击前记录骨架哈希基准。
+var armStateJS = `() => {` + strippedDOMHashSrc + `
+	window.__argoBefore = argoSkeletonHash();
+	window.__argoPrev = null;
 	return true;
 }`
 
-var checkMutationJS = `() => !!window.__argoMutated`
+// stateSettledJS 轮询：骨架哈希连续两次一致视为稳定；
+// 返回 "changed"（结构变了）或 "same"（结构没变）。仍在变返回空串。
+var stateSettledJS = `() => {` + strippedDOMHashSrc + `
+	const h = argoSkeletonHash();
+	if (h !== window.__argoPrev) { window.__argoPrev = h; return ""; }
+	return h === window.__argoBefore ? "same" : "changed";
+}`
 
 // currentURL 读取页面当前地址，失败返回空串。
 func currentURL(page *rod.Page) string {
@@ -665,6 +687,15 @@ func backToStart(page *rod.Page, startURL string) {
 	if startURL == "" {
 		return
 	}
+	// 等价重置（Crawljax reset 思路）：优先找「href 指向起点」的链接点击——
+	// SPA 下这是同文档路由（不重载，比 Navigate 快 2-4s）；MPA 下是普通导航，
+	// 效果等同。找不到再走整页 Navigate。
+	if res, err := page.Eval(equivalentResetJS, startURL); err == nil && res.Value.Bool() {
+		if ok, _ := page.Eval(`(u) => location.href.replace(/\/+$/, "").indexOf(u.replace(/\/+$/, "")) === 0`, startURL); ok != nil && ok.Value.Bool() {
+			time.Sleep(150 * time.Millisecond)
+			return
+		}
+	}
 	if err := page.Timeout(10 * time.Second).Navigate(startURL); err != nil {
 		log.Logger.Debugf("auto back to start err: %s", err)
 		return
@@ -675,6 +706,25 @@ func backToStart(page *rod.Page, startURL string) {
 	time.Sleep(150 * time.Millisecond)
 }
 
+// equivalentResetJS 找 href 指向起点的链接并点击（等价重置事件）。
+var equivalentResetJS = `(startURL) => {
+	const norm = (u) => String(u).replace(/\/+$/, "");
+	const target = norm(startURL);
+	const links = document.querySelectorAll("a[href]");
+	for (const a of links) {
+		try {
+			const abs = new URL(a.href, document.baseURI).href;
+			if (norm(abs) === target) {
+				if (typeof a.click === "function") { a.click(); } else {
+					a.dispatchEvent(new MouseEvent("click", {bubbles: true, cancelable: true, view: window}));
+				}
+				return true;
+			}
+		} catch (e) {}
+	}
+	return false;
+}`
+
 // settleAfterClick 等页面响应点击。
 //
 // 轮询 DOM 是否发生变化：变了就再给一小段时间渲染完，
@@ -684,15 +734,23 @@ func settleAfterClick(page *rod.Page, maxWait time.Duration) bool {
 	deadline := time.Now().Add(maxWait)
 	for time.Now().Before(deadline) {
 		time.Sleep(50 * time.Millisecond)
-		res, err := page.Eval(checkMutationJS)
+		res, err := page.Eval(stateSettledJS)
 		if err != nil {
 			// 执行上下文失效，说明页面已经导航走了
 			return true
 		}
-		if res != nil && res.Value.Bool() {
-			time.Sleep(80 * time.Millisecond)
+		if res == nil {
+			continue
+		}
+		state := res.Value.Str()
+		if state == "" {
+			continue // 骨架仍在变化，继续等
+		}
+		if state == "changed" {
+			time.Sleep(80 * time.Millisecond) // 给渲染留一点时间
 			return true
 		}
+		return false // "same"
 	}
 	return false
 }
@@ -907,22 +965,32 @@ func Auto(page *rod.Page, reportProgress func()) []string {
 	// 追链/回退的每轮成本（点击+settle+back+settle ≈ 1s）超过多步链收益。
 	// 路由 URL 本身由 __argoRoutes 捕获（纯增量，保留）；
 	// 多步路由链的定向推进（识别 /wizard/* 类链式模式专路跟随）列入 backlog。
-	clickSig := func(sig, xpath string, settle time.Duration) (changed bool, gained int, navAway bool) {
-		_, _ = page.Eval(armMutationJS)
-		if _, err := page.Eval(clickBySigJS, sig, xpath); err != nil {
+	// clickSig 返回：navAway=真导航（上下文死/点空，已回起点）；
+	// routeAway=SPA 同文档路由跳转（视图已换，不回起点——见 pass2 的链式跟随）。
+	clickSig := func(sig, xpath string, settle time.Duration) (changed bool, gained int, navAway bool, routeAway bool) {
+		_, _ = page.Eval(armStateJS)
+		res, err := page.Eval(clickBySigJS, sig, xpath)
+		if err != nil {
 			// 上下文失效 = 真导航走了，回起点继续下一个
 			log.Logger.Debugf("auto click %s navigated away: %s", sig, err)
 			backToStart(page, startURL)
-			return false, 0, true
+			return false, 0, true, false
+		}
+		// 点击落空（签名+xpath 都没找到元素）：当前视图不是元素所在视图，
+		// 回起点恢复后再继续（否则后续元素全部落空）
+		if res != nil && !res.Value.Bool() {
+			backToStart(page, startURL)
+			return false, 0, true, false
 		}
 		changed = settleAfterClick(page, settle)
 		before := len(hrefList)
 		collect()
 		if navigatedAway(currentURL(page), startURL) {
-			backToStart(page, startURL)
-			return changed, len(hrefList) - before, true
+			// 同文档路由跳转：URL 已被 __argoRoutes 捕获（gained 里计入），
+			// 视图留在原地，由 pass2 的链式跟随接手
+			return changed, len(hrefList) - before, false, true
 		}
-		return changed, len(hrefList) - before, false
+		return changed, len(hrefList) - before, false, false
 	}
 
 	firstReacted := make(map[string]bool, len(items))
@@ -944,8 +1012,12 @@ func Auto(page *rod.Page, reportProgress func()) []string {
 		if sig == "" {
 			continue
 		}
-		changed, gained, _ := clickSig(sig, sigXPath(items, i), maxSettle)
+		changed, gained, _, routed := clickSig(sig, sigXPath(items, i), maxSettle)
 		firstReacted[sig] = changed || gained > 0
+		if routed {
+			// 路由已换视图：列表失效，结束本遍由链式跟随接手
+			break
+		}
 	}
 
 	// 第二遍：择深——只重复有反应的元素；剩余预算不足 30% 时不再开新链
@@ -966,6 +1038,7 @@ func Auto(page *rod.Page, reportProgress func()) []string {
 			continue
 		}
 		noProgress := 0
+		chainRounds := 0 // 该元素已触发的路由跳转数（链式跟随）
 		for round := 1; round < maxRepeat; round++ {
 			if time.Now().After(deadline) {
 				break
@@ -974,7 +1047,27 @@ func Auto(page *rod.Page, reportProgress func()) []string {
 			if time.Until(deadline) < budget*3/10 && round > 2 {
 				break
 			}
-			_, gained, _ := clickSig(sig, sigXPath(items, i), maxSettle)
+			_, gained, navAway, routed := clickSig(sig, sigXPath(items, i), maxSettle)
+			if routed {
+				// 链式跟随：向导/结账等多步路由链，下一步按钮在新视图的
+				// 同一位置——继续点击同一元素即可沿链前进；每跳一步路由
+				// 都被 __argoRoutes 收集（gained>0）。链断（无新路由/落空）
+				// 时回起点继续其余元素。
+				chainRounds++
+				if gained > 0 {
+					noProgress = 0
+					continue
+				}
+				noProgress++
+				if noProgress >= 2 {
+					backToStart(page, startURL)
+					break
+				}
+				continue
+			}
+			if navAway {
+				break
+			}
 			// 多步流程（解锁/面包屑/问卷/结算/SPA 路由链）要反复点同一按钮
 			// 才逐步放出后续；连续两轮无新链即收（unlock 第 1 轮只更新计数器、
 			// 第 2 轮出链接，所以阈值是 2 不是 1）
@@ -1005,7 +1098,7 @@ func Auto(page *rod.Page, reportProgress func()) []string {
 				if x <= 0 || y <= 0 {
 					continue
 				}
-				_, _ = page.Eval(armMutationJS)
+				_, _ = page.Eval(armStateJS)
 				if err := mouse.MoveTo(proto.Point{X: x, Y: y}); err != nil {
 					continue
 				}
@@ -1064,7 +1157,7 @@ func Auto(page *rod.Page, reportProgress func()) []string {
 				clickedSigs[sig] = true
 				fresh++
 				log.Logger.Debugf("auto extra element: %s", sig)
-				_, _ = page.Eval(armMutationJS)
+				_, _ = page.Eval(armStateJS)
 				if _, err := page.Eval(clickBySigJS, sig, sigXPath(items, i)); err != nil {
 					backToStart(page, startURL)
 					continue
@@ -1078,7 +1171,7 @@ func Auto(page *rod.Page, reportProgress func()) []string {
 						if time.Now().After(deadline) {
 							break
 						}
-						_, _ = page.Eval(armMutationJS)
+						_, _ = page.Eval(armStateJS)
 						if _, err := page.Eval(clickBySigJS, sig, sigXPath(items, i)); err != nil {
 							break
 						}
@@ -1104,7 +1197,7 @@ func Auto(page *rod.Page, reportProgress func()) []string {
 	// 放在交互之后：提交有副作用（跳转），不能打断前面的点击循环。
 	// 等待压到 600ms：提交只是为了让 POST 请求发出去，流量劫持会立即捕获；
 	// 等太久会挤占其他交互的预算（实测等 1.5s 会把 shop 类挤掉 20 多条）。
-	if _, err := page.Eval(armMutationJS); err == nil {
+	if _, err := page.Eval(armStateJS); err == nil {
 		if _, err := page.Eval(submitFormsJS,
 			cfg.LoginConf.Username, cfg.LoginConf.Password,
 			cfg.LoginConf.Email, cfg.LoginConf.Phone, formRules); err != nil {

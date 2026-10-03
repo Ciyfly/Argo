@@ -6,6 +6,7 @@ import (
 	"argo/pkg/log"
 	"argo/pkg/req"
 	"argo/pkg/updateself"
+	"argo/pkg/web"
 	"fmt"
 	"io/ioutil"
 	golog "log"
@@ -13,6 +14,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+
 	"syscall"
 	"time"
 
@@ -106,6 +108,12 @@ func main() {
 			Usage:    "Close a tab after it has been idle (no new links found) for this many seconds. Pages keep making progress stay open longer.",
 			Category: BrowserArgsGroup,
 		},
+		&cli.BoolFlag{
+			Name:     "spider",
+			Value:    true,
+			Usage:    "Show the spider crawling animation overlay in headed mode (--uh/--waitlogin); it walks to and taps each element Argo clicks. Use --spider=false to disable.",
+			Category: BrowserArgsGroup,
+		},
 		&cli.StringFlag{
 			Name:     "userAgent",
 			Value:    "",
@@ -158,6 +166,18 @@ func main() {
 			Name:     "resume",
 			Value:    "",
 			Usage:    "Resume a previous crawl from its state file (<outputdir>/<save>.state.json).",
+			Category: UseArgsGroup,
+		},
+		&cli.BoolFlag{
+			Name:     "web",
+			Value:    false,
+			Usage:    "Start the built-in web console (create tasks, live URL feed, live browser view with the spider).",
+			Category: UseArgsGroup,
+		},
+		&cli.StringFlag{
+			Name:     "webaddr",
+			Value:    "127.0.0.1:8088",
+			Usage:    "Listen address for the web console. Defaults to localhost only.",
 			Category: UseArgsGroup,
 		},
 		&cli.StringFlag{
@@ -369,10 +389,28 @@ func main() {
 	}
 }
 
+// runWebConsole 启动内置 web 控制台并阻塞（项目制，见 pkg/web）。
+func runWebConsole(addr string) error {
+	return web.Start(addr)
+}
+
 func RunMain(c *cli.Context) error {
 	update := c.Bool("update")
 	if update {
 		updateself.CheckIfUpgradeRequired(Version)
+		return nil
+	}
+	// web 控制台模式：任务由页面创建，不需要命令行 target。
+	// 直接读 cli flag（GlobalConfig 尚未加载），runWebConsole 内部自行加载配置。
+	if c.Bool("web") {
+		debug := c.Bool("debug")
+		quiet := c.Bool("quiet")
+		log.Init(debug, quiet)
+		conf.LoadConfig()
+		conf.MergeArgs(c)
+		if err := runWebConsole(conf.GlobalConfig.WebAddr); err != nil {
+			log.Logger.Errorf("web console err: %s", err)
+		}
 		return nil
 	}
 	target := c.String("target")

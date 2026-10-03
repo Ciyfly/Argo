@@ -98,3 +98,9 @@ type Project struct {
 - [x] 修复② 运行中切走再切回当前目标前半段丢失（SSE 游标不回退 + store 目标
       结束才落盘）→ selectProject 对 live 项目重建 SSE 连接从头推
 - [x] 实测 rod 驱动真实页面：438 条项目渲染 438 行=计数，统计与结果文件一致
+
+## 追加：POST 高亮（2026-10-03）
+
+- [x] Web：POST 徽标橙色加粗（#ff9e64）+ 行左侧橙色边条，GET 不变
+- [x] 终端：结果日志 POST 行方法段亮紫(95)高亮（resultHandlerWork），
+      实测爬取 9 条 POST 全部命中；rod 实测 Web 颜色断言通过

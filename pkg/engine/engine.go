@@ -449,87 +449,90 @@ func (ei *EngineInfo) Start(ctx context.Context) {
 
 			// 优化, 先判断,再组合
 			if scope.IsInScope(ctx.Request.URL().String()) {
-				var save, body io.ReadCloser
-				var saveBytes, reqBytes []byte
-				reqBytes, _ = httputil.DumpRequest(ctx.Request.Req(), true)
-				// fix 20230320 body nil copy处理会导致 nginx 411 问题 只有当post才进行处理
-				// https://open.baidu.com/
-				if ctx.Request.Method() == http.MethodPost {
-					save, body, _ = copyBody(ctx.Request.Req().Body)
-					saveBytes, _ = ioutil.ReadAll(save)
-				}
-				ctx.Request.Req().Body = body
-				// 这个回调会被多个请求并发调用，reqClient 必须是局部变量，
-				// 否则并发写同一个变量会产生数据竞争。
-				var reqClient *http.Client
-				// proxy（pushproxy 优先，见 req.EffectiveProxy——扫描器推送时探测流量也不能绕过）
-				if req.EffectiveProxy() != "" {
-					reqClient = req.GetProxyClient()
-				} else {
-					reqClient = http.DefaultClient
-				}
-				// ua
-				if conf.GlobalConfig.BrowserConf.UserAgent != "" {
-					ctx.Request.Req().Header.Set("User-Agent", conf.GlobalConfig.BrowserConf.UserAgent)
-				}
-				// 加载响应：失败按配置重试（线性退避），错误不再静默吞掉
-				loadErr := ctx.LoadResponse(reqClient, true)
-				for attempt := 1; loadErr != nil && attempt <= conf.GlobalConfig.BrowserConf.Retry; attempt++ {
-					time.Sleep(ratelimit.RetryBackoff(attempt))
-					loadErr = ctx.LoadResponse(reqClient, true)
-				}
-				if loadErr != nil {
-					log.Logger.Debugf("load response %s err: %s", ctx.Request.URL().String(), loadErr)
-					return
-				}
-				// load 后才有响应相关
-				if ctx.Response.Payload().ResponseCode == http.StatusNotFound {
-					return
-				}
-				// 先简单的通过关键字匹配 404页面
-				if ctx.Response.Payload().Body != nil {
-					if static.Match404ResponsePage(reqBytes) {
-						log.Logger.Warnf("404 response: %s", ctx.Request.URL().String())
+				processInScope := func() {
+					var save, body io.ReadCloser
+					var saveBytes, reqBytes []byte
+					reqBytes, _ = httputil.DumpRequest(ctx.Request.Req(), true)
+					// fix 20230320 body nil copy处理会导致 nginx 411 问题 只有当post才进行处理
+					// https://open.baidu.com/
+					if ctx.Request.Method() == http.MethodPost {
+						save, body, _ = copyBody(ctx.Request.Req().Body)
+						saveBytes, _ = ioutil.ReadAll(save)
+					}
+					ctx.Request.Req().Body = body
+					// 这个回调会被多个请求并发调用，reqClient 必须是局部变量，
+					// 否则并发写同一个变量会产生数据竞争。
+					var reqClient *http.Client
+					// proxy（pushproxy 优先，见 req.EffectiveProxy——扫描器推送时探测流量也不能绕过）
+					if req.EffectiveProxy() != "" {
+						reqClient = req.GetProxyClient()
+					} else {
+						reqClient = http.DefaultClient
+					}
+					// ua
+					if conf.GlobalConfig.BrowserConf.UserAgent != "" {
+						ctx.Request.Req().Header.Set("User-Agent", conf.GlobalConfig.BrowserConf.UserAgent)
+					}
+					// 加载响应：失败按配置重试（线性退避），错误不再静默吞掉
+					loadErr := ctx.LoadResponse(reqClient, true)
+					for attempt := 1; loadErr != nil && attempt <= conf.GlobalConfig.BrowserConf.Retry; attempt++ {
+						time.Sleep(ratelimit.RetryBackoff(attempt))
+						loadErr = ctx.LoadResponse(reqClient, true)
+					}
+					if loadErr != nil {
+						log.Logger.Debugf("load response %s err: %s", ctx.Request.URL().String(), loadErr)
 						return
 					}
+					// load 后才有响应相关
+					if ctx.Response.Payload().ResponseCode == http.StatusNotFound {
+						return
+					}
+					// 先简单的通过关键字匹配 404页面
+					if ctx.Response.Payload().Body != nil {
+						if static.Match404ResponsePage(reqBytes) {
+							log.Logger.Warnf("404 response: %s", ctx.Request.URL().String())
+							return
+						}
 
-				}
-				if ei.IsPage404(ctx.Request.URL().String()) {
-					return
-				}
-				if ctx.Request.URL().String() == ei.GetPage404PageURL() {
-					// 随机请求的url 404
-					return
-				}
-				// 响应体二次提取：JS 接口入爬取队列、文本响应检密钥。
-				// 提取在 body 编码存储之前做，--norrs 下同样生效。
-				// hybrid fetcher 走同一个函数（extract_hook.go），两路语义一致。
-				processExtractedResponse(ctx.Request.URL().String(), hijackContentType(ctx), ctx.Response.Payload().Body)
-				// fix 管道关闭了但是还推数据的问题
-				if NormalizeCloseChanFlag {
-					return
-				}
-				pu := &PendingUrl{
-					URL:             ctx.Request.URL().String(),
-					Method:          ctx.Request.Method(),
-					Host:            ctx.Request.Req().Host,
-					Headers:         ctx.Request.Req().Header,
-					Data:            string(saveBytes),
-					ResponseHeaders: transformHttpHeaders(ctx.Response.Payload().ResponseHeaders),
-					Status:          ctx.Response.Payload().ResponseCode,
-				}
+					}
+					if ei.IsPage404(ctx.Request.URL().String()) {
+						return
+					}
+					if ctx.Request.URL().String() == ei.GetPage404PageURL() {
+						// 随机请求的url 404
+						return
+					}
+					// 响应体二次提取：JS 接口入爬取队列、文本响应检密钥。
+					// 提取在 body 编码存储之前做，--norrs 下同样生效。
+					// hybrid fetcher 走同一个函数（extract_hook.go），两路语义一致。
+					processExtractedResponse(ctx.Request.URL().String(), hijackContentType(ctx), ctx.Response.Payload().Body)
+					// fix 管道关闭了但是还推数据的问题
+					if NormalizeCloseChanFlag {
+						return
+					}
+					pu := &PendingUrl{
+						URL:             ctx.Request.URL().String(),
+						Method:          ctx.Request.Method(),
+						Host:            ctx.Request.Req().Host,
+						Headers:         ctx.Request.Req().Header,
+						Data:            string(saveBytes),
+						ResponseHeaders: transformHttpHeaders(ctx.Response.Payload().ResponseHeaders),
+						Status:          ctx.Response.Payload().ResponseCode,
+					}
 
-				// update 优化可以不存储请求响应的字符串来优化内存性能
-				if !conf.GlobalConfig.NoReqRspStr {
-					pu.ResponseBody = utils.EncodeBase64(ctx.Response.Payload().Body)
-					pu.RequestStr = utils.EncodeBase64(reqBytes)
+					// update 优化可以不存储请求响应的字符串来优化内存性能
+					if !conf.GlobalConfig.NoReqRspStr {
+						pu.ResponseBody = utils.EncodeBase64(ctx.Response.Payload().Body)
+						pu.RequestStr = utils.EncodeBase64(reqBytes)
+					}
+					if scope.IsInScope(pu.URL) {
+						pushpendingNormalizeQueue(pu)
+					} else {
+						// 域外 URL 不入结果，但记录下来供 outscope 输出
+						scope.RecordOutScope(pu.URL)
+					}
 				}
-				if scope.IsInScope(pu.URL) {
-					pushpendingNormalizeQueue(pu)
-				} else {
-					// 域外 URL 不入结果，但记录下来供 outscope 输出
-					scope.RecordOutScope(pu.URL)
-				}
+				processInScope()
 			}
 		}
 		ctx.ContinueRequest(&proto.FetchContinueRequest{})

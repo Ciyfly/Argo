@@ -985,6 +985,10 @@ func Auto(page *rod.Page, reportProgress func()) []string {
 		changed = settleAfterClick(page, settle)
 		before := len(hrefList)
 		collect()
+		// 点击本身即进度：shop 类页面每项点击 0.3-1s、新链接出得慢，
+		// 只按"新链接"计时会在 Auto 预算（35s）内被 idle 超时（10s）误杀
+		//（实测 spa/shop/products 页 10s 被杀，翻页链全丢）
+		ping()
 		if navigatedAway(currentURL(page), startURL) {
 			// 同文档路由跳转：URL 已被 __argoRoutes 捕获（gained 里计入），
 			// 视图留在原地，由 pass2 的链式跟随接手

@@ -42,47 +42,50 @@ const spiderOverlayJS = `() => {
 	} catch (e) { return false; }
 	document.documentElement.appendChild(host);
 
-	// ---- 蜘蛛形态（SVG）：科技感机械蛛——腿展夸张（约 4 倍体长）----
-	// 每条腿是两段直线（髋→膝→足）+ 膝关节发光节点，直线关节是机械感的关键；
+	// ---- 蜘蛛形态（SVG）：精致机械蛛——流线装甲双体 + 两段折线腿，
+	// 腿展收敛到约 2.5-3 倍体长（旧版 8 倍张开像海星），步态放慢更显从容。
+	// 每条腿是两段直线（髋→膝→足）+ 膝关节微光节点；
 	// 髋部 transform-origin 供步态摆动与伸腿。
 	// legs[i] = {hx,hy 髋, kx,ky 膝, fx,fy 足, phase 步态组}
 	const legDefs = [
-		// 右侧四条（前→后）：膝高举、足尖远落，腿展夸张
-		{hx: 8, hy: -4, kx: 60, ky: -95, fx: 150, fy: -55, phase: 0},
-		{hx: 9, hy: -1, kx: 78, ky: -60, fx: 185, fy: 15, phase: 1},
-		{hx: 8, hy: 2, kx: 66, ky: -18, fx: 160, fy: 85, phase: 0},
-		{hx: 6, hy: 4, kx: 44, ky: 8, fx: 115, fy: 140, phase: 1},
-		// 左侧四条（x 镜像）
-		{hx: -8, hy: -4, kx: -60, ky: -95, fx: -150, fy: -55, phase: 1},
-		{hx: -9, hy: -1, kx: -78, ky: -60, fx: -185, fy: 15, phase: 0},
-		{hx: -8, hy: 2, kx: -66, ky: -18, fx: -160, fy: 85, phase: 1},
-		{hx: -6, hy: 4, kx: -44, ky: 8, fx: -115, fy: 140, phase: 0},
+		// 右侧四条（前→后）：膝高抬、足尖落地
+		{hx: 6, hy: -4, kx: 26, ky: -36, fx: 58, fy: -20, phase: 0},
+		{hx: 7, hy: -1, kx: 32, ky: -24, fx: 70, fy: 4, phase: 1},
+		{hx: 6, hy: 2, kx: 28, ky: -4, fx: 62, fy: 28, phase: 0},
+		{hx: 5, hy: 4, kx: 21, ky: 6, fx: 48, fy: 44, phase: 1},
+		// 左侧四条（x 镜像，步态组交错——四足步态）
+		{hx: -6, hy: -4, kx: -26, ky: -36, fx: -58, fy: -20, phase: 1},
+		{hx: -7, hy: -1, kx: -32, ky: -24, fx: -70, fy: 4, phase: 0},
+		{hx: -6, hy: 2, kx: -28, ky: -4, fx: -62, fy: 28, phase: 1},
+		{hx: -5, hy: 4, kx: -21, ky: 6, fx: -48, fy: 44, phase: 0},
 	];
 
 	const style = document.createElement("style");
 	style.textContent = [
 		":host,*{margin:0;padding:0}",
 		".world{position:fixed;left:0;top:0;width:100vw;height:100vh;pointer-events:none;overflow:hidden}",
-		".spider{position:absolute;width:0;height:0;will-change:transform;filter:drop-shadow(0 0 6px rgba(56,232,255,.35))}",
+		".spider{position:absolute;width:0;height:0;will-change:transform;filter:drop-shadow(0 0 5px rgba(56,232,255,.28))}",
 		".spider svg{overflow:visible;display:block}",
-		".leg{stroke:#57e6ff;stroke-width:1.4;fill:none;stroke-linecap:round;stroke-linejoin:round;opacity:.95}",
-		".joint{fill:#0c1420;stroke:#57e6ff;stroke-width:1}",
-		".foot{fill:#aef4ff}",
-		".legA{animation:swingA .2s cubic-bezier(.4,0,.6,1) infinite alternate}",
-		".legB{animation:swingB .2s cubic-bezier(.4,0,.6,1) infinite alternate}",
-		"@keyframes swingA{from{transform:rotate(-4deg)}to{transform:rotate(6deg)}}",
-		"@keyframes swingB{from{transform:rotate(6deg)}to{transform:rotate(-4deg)}}",
-		".core{fill:#0b1220;stroke:#57e6ff;stroke-width:1.2}",
+		".leg{stroke:#57e6ff;stroke-width:1.5;fill:none;stroke-linecap:round;stroke-linejoin:round;opacity:.92}",
+		".joint{fill:#0c1420;stroke:#2aa8c8;stroke-width:.8}",
+		".foot{fill:#9ff1ff;opacity:.85}",
+		// 步态：四足交替（tetrapod），慢速小幅度——比旧版 0.2s 狂摆从容得多
+		".legA{animation:swingA .42s cubic-bezier(.45,0,.55,1) infinite alternate}",
+		".legB{animation:swingB .42s cubic-bezier(.45,0,.55,1) infinite alternate}",
+		"@keyframes swingA{from{transform:rotate(-2.5deg)}to{transform:rotate(3.5deg)}}",
+		"@keyframes swingB{from{transform:rotate(3.5deg)}to{transform:rotate(-2.5deg)}}",
+		".core{fill:#0b1220;stroke:#57e6ff;stroke-width:1.1}",
 		".shell{fill:rgba(12,20,32,.92);stroke:#2aa8c8;stroke-width:1}",
-		".pulse{fill:#9ff1ff;animation:corepulse 1.1s ease-in-out infinite alternate}",
-		"@keyframes corepulse{from{opacity:.45;r:2}to{opacity:1;r:3.2}}",
-		".eye{fill:#eafcff;animation:corepulse .9s ease-in-out infinite alternate}",
-		".ring{fill:none;stroke:rgba(87,230,255,.4);stroke-width:1;animation:ringspin 5s linear infinite;transform-origin:0 0}",
+		".panel{fill:none;stroke:rgba(87,230,255,.35);stroke-width:.8}",
+		".visor{fill:none;stroke:#eafcff;stroke-width:1.6;stroke-linecap:round;filter:drop-shadow(0 0 3px rgba(154,241,255,.9))}",
+		".pulse{fill:#9ff1ff;animation:corepulse 1.6s ease-in-out infinite alternate}",
+		"@keyframes corepulse{from{opacity:.45;r:1.8}to{opacity:1;r:2.8}}",
+		".ring{fill:none;stroke:rgba(87,230,255,.22);stroke-width:1;animation:ringspin 14s linear infinite;transform-origin:0 0}",
 		"@keyframes ringspin{from{transform:rotate(0)}to{transform:rotate(360deg)}}",
-		".bob{animation:bob .17s ease-in-out infinite alternate}",
+		".bob{animation:bob .42s ease-in-out infinite alternate}",
 		".lunge{animation:lunge .3s cubic-bezier(.2,.8,.3,1.3)}",
 		"@keyframes lunge{0%{transform:translateY(0) scale(1)}40%{transform:translateY(-3px) scale(1.18)}100%{transform:translateY(0) scale(1)}}",
-		"@keyframes bob{from{transform:translateY(0)}to{transform:translateY(-2px)}}",
+		"@keyframes bob{from{transform:translateY(0)}to{transform:translateY(-1.5px)}}",
 		".tapfx{position:absolute;width:34px;height:34px;border:4px solid rgba(140,245,255,1);border-radius:50%;transform:translate(-50%,-50%) scale(.2);opacity:0;pointer-events:none;box-shadow:0 0 20px rgba(87,230,255,.95),inset 0 0 12px rgba(87,230,255,.6)}",
 		".tapfx.go{animation:ripple .38s ease-out forwards}",
 		"@keyframes ripple{0%{transform:translate(-50%,-50%) scale(.2);opacity:1}100%{transform:translate(-50%,-50%) scale(2.8);opacity:0}}",
@@ -114,7 +117,7 @@ const spiderOverlayJS = `() => {
 	world.className = "world";
 	root.appendChild(world);
 
-	// SVG：科技核心身体（小）+ 8 条超长机械腿 + 膝关节节点
+	// SVG：流线装甲身体（前驾驶舱 + 后装甲舱，面板线点缀）+ 8 条两段机械腿
 	const NS = "http://www.w3.org/2000/svg";
 	const svg = document.createElementNS(NS, "svg");
 	svg.innerHTML = [
@@ -123,19 +126,19 @@ const spiderOverlayJS = `() => {
 		'<stop offset="0%" stop-color="#2aa8c8"/><stop offset="100%" stop-color="#9ff1ff"/>',
 		'</linearGradient>',
 		'</defs>',
-		'<circle class="ring" cx="0" cy="0" r="30" stroke-dasharray="6 10"/>',
+		'<circle class="ring" cx="0" cy="0" r="24" stroke-dasharray="4 12"/>',
 		'<g class="bob">',
 		'<g id="argoLegs"></g>',
 		'<line id="argoStrike" class="strike" x1="0" y1="0" x2="0" y2="0"/>',
 		'<circle id="argoGrab" class="foot" cx="0" cy="0" r="0"/>',
-		// 腹部：后置六边形装甲壳
-		'<path class="shell" d="M -30 -8 L -18 -14 L -6 -10 L -4 2 L -14 12 L -27 9 Z"/>',
-		'<path class="shell" d="M -26 -5 L -16 -9 L -8 -4 L -9 5 L -18 9 L -27 4 Z" opacity="0"/>',
-		// 头胸部：前置小核心
-		'<path class="core" d="M -2 -9 L 10 -6 L 15 1 L 9 9 L -3 8 L -8 0 Z"/>',
-		'<circle class="pulse" cx="4" cy="0" r="2.6"/>',
-		'<circle class="eye" cx="11" cy="-3" r="1.2"/>',
-		'<circle class="eye" cx="12" cy="2" r="0.9"/>',
+		// 腹部（后）：流线装甲舱 + 两条面板线
+		'<path class="shell" d="M -6 -7 C -18 -10 -31 -6 -33 1 C -31 8 -18 11 -6 7 C -2 5 -2 -5 -6 -7 Z"/>',
+		'<path class="panel" d="M -12 -7.6 C -17 -6 -17 6 -12 7.6"/>',
+		'<path class="panel" d="M -20 -6.4 C -25 -4 -25 4 -20 6.4"/>',
+		// 头胸部（前）：楔形驾驶舱 + 核心脉冲 + 单条扫描目镜（替代旧版两只小眼）
+		'<path class="core" d="M -3 -8 C 5 -10 13 -6 14 0 C 13 6 5 9 -3 7 C -6 5 -6 -6 -3 -8 Z"/>',
+		'<circle class="pulse" cx="5" cy="0" r="2.2"/>',
+		'<path class="visor" d="M 7 -3.2 L 12 -2.6"/>',
 		'</g>',
 	].join("");
 
@@ -155,14 +158,14 @@ const spiderOverlayJS = `() => {
 		joint.setAttribute("class", "joint");
 		joint.setAttribute("cx", def.kx);
 		joint.setAttribute("cy", def.ky);
-		joint.setAttribute("r", 2.2);
+		joint.setAttribute("r", 1.7);
 		g.appendChild(joint);
 		// 足尖光点
 		const foot = document.createElementNS(NS, "circle");
 		foot.setAttribute("class", "foot");
 		foot.setAttribute("cx", def.fx);
 		foot.setAttribute("cy", def.fy);
-		foot.setAttribute("r", 1.3);
+		foot.setAttribute("r", 1.1);
 		g.appendChild(foot);
 		legsGroup.appendChild(g);
 		legs.push({group: g, def: def});
@@ -188,11 +191,11 @@ const spiderOverlayJS = `() => {
 	world.appendChild(taplabel);
 
 	// SVG 需要有尺寸才能渲染：给 0 尺寸 + overflow visible 时 Chrome 会画出来，
-	// 但部分版本裁剪——稳妥起见给一个透明承载尺寸
-	svg.setAttribute("width", "420");
-	svg.setAttribute("height", "300");
-	svg.style.marginLeft = "-210px";
-	svg.style.marginTop = "-160px";
+	// 但部分版本裁剪——稳妥起见给一个透明承载尺寸（腿展 ±70/±46，留边）
+	svg.setAttribute("width", "180");
+	svg.setAttribute("height", "130");
+	svg.style.marginLeft = "-90px";
+	svg.style.marginTop = "-72px";
 
 	const pos = {x: Math.max(60, window.innerWidth * 0.6), y: window.innerHeight * 0.72};
 	let walkToken = 0;
@@ -304,7 +307,7 @@ const spiderOverlayJS = `() => {
 		// 目标在视口内才去（视口外元素滚过去看不见，直接点）
 		const inView = x >= 0 && y >= 0 && x <= window.innerWidth && y <= window.innerHeight;
 		const done = inView
-			? moveTo(x - 90, y - 55, 260).then(function () { tapLeg(x, y); })
+			? moveTo(x - 55, y - 38, 260).then(function () { tapLeg(x, y); })
 			: Promise.resolve();
 		return done.then(function () {
 			tapfx.style.left = x + "px";

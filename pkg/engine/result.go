@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path"
 	"reflect"
@@ -204,7 +205,13 @@ func resultHandlerWork(ctx context.Context, queue chan *PendingUrl) {
 				resultMu.Lock()
 				ResultList = append(ResultList, data)
 				resultMu.Unlock()
-				log.Logger.Infof("[%s] %s", data.Method, data.URL)
+				if data.Method == http.MethodPost {
+					// POST 用亮紫色高亮方法段（POST 接口往往更值得关注），
+					// 尾部 \x1b[36m 恢复 info 行色，URL 部分与 GET 行观感一致
+					log.Logger.Infof("\x1b[95m[POST]\x1b[36m %s", data.URL)
+				} else {
+					log.Logger.Infof("[%s] %s", data.Method, data.URL)
+				}
 			}
 			atomic.AddInt64(&resultHandledCount, 1)
 		}

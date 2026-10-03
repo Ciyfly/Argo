@@ -58,6 +58,8 @@ button.loading::before{content:'';position:absolute;left:10px;top:50%;width:12px
 .u{padding:4px 14px;font:12px/1.45 ui-monospace,Consolas,monospace;border-left:2px solid transparent;word-break:break-all}
 .u:hover{background:#13233a;border-left-color:var(--cyan-dim)}
 .u .m{color:var(--cyan-dim);margin-right:8px}
+.u .m.post{color:#ff9e64;font-weight:700;text-shadow:0 0 8px rgba(255,158,100,.45)}
+.u.post{border-left:2px solid #9a5b1d}
 .u .s{color:var(--muted);margin-right:8px}
 .u .s.nr{opacity:.65;font-style:italic}
 #stage{flex:1;display:flex;align-items:center;justify-content:center;padding:10px;position:relative;min-height:0}
@@ -156,8 +158,9 @@ urlsEl.addEventListener('scroll', () => {
   autoScroll = urlsEl.scrollTop + urlsEl.clientHeight >= urlsEl.scrollHeight - 30;
 });
 function renderUrl(method, status, url){
-  const div = document.createElement('div'); div.className = 'u';
-  const m = document.createElement('span'); m.className='m'; m.textContent = method || 'GET';
+  const mText = (method || 'GET').toUpperCase();
+  const div = document.createElement('div'); div.className = 'u' + (mText === 'POST' ? ' post' : '');
+  const m = document.createElement('span'); m.className = 'm' + (mText === 'POST' ? ' post' : ''); m.textContent = mText;
   div.appendChild(m);
   // 状态码 0 = 「解析即发现」的接口（JS 提取，从未真实请求），标注出来与已请求的区分
   const s = document.createElement('span'); s.className='s' + (status ? '' : ' nr'); s.textContent = status || '未请求';

@@ -117,3 +117,13 @@ DOM 变化（changed=true 永不提前退），第一个 tab 吃满 maxRepeat �
    连续两轮无新链即收，剩余预算 <30% 不再开新链。
 
 实测：spa 0.736→0.793（新高）；classic 0.946 无回归。
+
+## SPA 0.836 提升尝试（2026-10-03，未达标回退）
+
+缺失 23 条聚类为多步路由链（wizard/onboard/nested/checkout，~14 条）+ shop history（9 条）。
+尝试两种"路由追链"方案推进多步路由链：
+- 视图循环重列：0.750——串行吞预算 + 误触路由中断原页面遍历
+- history.back 追链：0.757——每轮成本（点击+settle+back+settle≈1s）超过收益
+均低于 backToStart 现状 0.836，已回退（保留纯增量的 __argoRoutes 路由 URL 捕获）。
+结论：SPA 多步路由链需要**定向识别**（如 URL 模式 /wizard/step-* 判定为链式
+流程后专路跟随，而非通用点击的副作用），列为 backlog。

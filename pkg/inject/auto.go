@@ -899,13 +899,18 @@ func Auto(page *rod.Page, reportProgress func()) []string {
 	// DOM 变化（changed=true 永不提前退），maxRepeat 轮点完才轮到第二个，
 	// 预算烧光后面 9 个 tab 从未被点击。
 	//
-	// 第一遍：每个元素保证点一次——所有 tab/菜单挨个轮到；
-	// 第二遍：只对第一遍「有反应」的元素重复点击（多步流程在这里推进）。
-	firstReacted := make(map[string]bool, len(items))
+	// clickSig 返回：navAway=真导航（上下文已死，已回起点）；
+	// routeAway=SPA 路由跳转（同文档换视图，不回起点——回起点会清掉
+	// 向导/多步流程的应用状态，实测 wizard/onboard 链永远走不完）。
+	// SPA 路由跳转的三种方案实测：backToStart（现状）0.836、视图循环重列 0.750、
+	// history.back 追链 0.757——后两者输在：路由跳转多数是普通导航点击，
+	// 追链/回退的每轮成本（点击+settle+back+settle ≈ 1s）超过多步链收益。
+	// 路由 URL 本身由 __argoRoutes 捕获（纯增量，保留）；
+	// 多步路由链的定向推进（识别 /wizard/* 类链式模式专路跟随）列入 backlog。
 	clickSig := func(sig, xpath string, settle time.Duration) (changed bool, gained int, navAway bool) {
 		_, _ = page.Eval(armMutationJS)
 		if _, err := page.Eval(clickBySigJS, sig, xpath); err != nil {
-			// 上下文失效 = 点击把页面导航走了，回起点继续下一个
+			// 上下文失效 = 真导航走了，回起点继续下一个
 			log.Logger.Debugf("auto click %s navigated away: %s", sig, err)
 			backToStart(page, startURL)
 			return false, 0, true
@@ -919,6 +924,8 @@ func Auto(page *rod.Page, reportProgress func()) []string {
 		}
 		return changed, len(hrefList) - before, false
 	}
+
+	firstReacted := make(map[string]bool, len(items))
 
 	// 第一遍：广度——每个元素一次
 	for i := range items {
@@ -968,9 +975,9 @@ func Auto(page *rod.Page, reportProgress func()) []string {
 				break
 			}
 			_, gained, _ := clickSig(sig, sigXPath(items, i), maxSettle)
-			// 多步流程（解锁/面包屑/问卷/结算）要反复点同一按钮才逐步出链接；
-			// 连续两轮无新链即收（unlock 第 1 轮只更新计数器、第 2 轮出链接，
-			// 所以阈值是 2 不是 1）
+			// 多步流程（解锁/面包屑/问卷/结算/SPA 路由链）要反复点同一按钮
+			// 才逐步放出后续；连续两轮无新链即收（unlock 第 1 轮只更新计数器、
+			// 第 2 轮出链接，所以阈值是 2 不是 1）
 			if gained > 0 {
 				noProgress = 0
 			} else {

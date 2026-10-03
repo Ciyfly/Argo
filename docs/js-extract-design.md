@@ -155,3 +155,8 @@ CLI：`--extract` / `--secrets`（bool，默认 true，显式传 false 关闭—
 - [x] OnEndpoint 签名贯通 engine (go build ./... 通过)
 - [x] 靶场实测 (192.168.0.130:8765：POST 3→9，新增路由表三条 /api/spa/items/search 等；总数 438 持平)
 - [x] 控制台未请求徽标 (console.html renderUrl：status 0 → `未请求`，样式 .s.nr)
+
+补充排查结论（2026-10-03）：fetchCallRegex 收窄为 fetch|axios|\$\.ajax 后，
+axios.head/options/request、$.getJSON 等非常规动词调用不会被丢——它们的首参路径
+仍被 quotedPathRegex 捕获记 GET（与改前行为一致，实测验证）。已知限制：
+fetch 选项含嵌套对象（{headers:{...},method:"POST"}）时 method 识别不到，记 GET。

@@ -80,3 +80,12 @@ type Project struct {
 - [x] API 路由 + SSE 事件带 project_id（前端过滤非当前项目）
 - [x] console.html 项目化重构（侧栏项目列表/新建弹层/目标进度点/导出按钮）
 - [x] 端到端：建项目(2目标)→顺序执行→死端口目标正确标 failed(count=0)→重启进程项目与结果仍在→导出三格式内容正确
+
+## 修复记录（2026-10-03 梳理）
+
+- [x] runLoop MaxDepth 缺 0 守卫：API 直建项目不带 params 时把全局 maxdepth 压成 0、
+      depth 过滤只剩首页整目标白跑；补 `>0` 守卫（与 TabCount 一致）
+- [x] quiet 组合修复：config.yml 开 quiet 时 resultHandlerWork 只打印不进 ResultList，
+      web 控制台实时流/项目结果全空；runLoop 强制关 quiet、目标跑完还原
+- [~] 已知不修：① SSE 目标切换边界（≤500ms 窗口）可能把上一目标尾部条目标成新目标 id（纯展示层）；
+      ② 项目内被 stop 的目标重开项目后永远跳过，无法续跑（当前设计，需重开项目）

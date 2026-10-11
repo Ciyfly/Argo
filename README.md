@@ -23,6 +23,7 @@
 13. JS 接口提取带方法识别：`axios.post`/`$.put`、`fetch(url,{method})`、路由表 `{method,path}`
     里的 POST/PUT 等如实记录，不再一律记 GET
 14. 内置 Web 控制台：项目制多目标、结果实时流、浏览器画面直播、GET/POST/未请求统计、POST 高亮
+15. 危险操作防护 safety：默认不改密码/不提交删除类表单/不访问登出链接，URL 发现不受损（DVWA 等靶场指纹自动加严）
 13. 更新了 增加多个目标爬取后指定生成到一个文件 增加指定UA
 
 注意: 我开放了很多参数 几个参数配合使用可以达到自己想要的效果
@@ -377,6 +378,23 @@ form:
       value: "110101199001011234"
   skip: ["captcha|verify_?code|验证码"]
 ```
+
+### 危险操作防护 safety（默认开启）
+爬虫的自动交互默认**不修改目标状态**：不改密码、不提交删除/重置类表单、不访问登出链接
+（实测未防护时爬 DVWA 会把 admin 密码改成空并把自己登出，见 docs/safety-guard-design.md）。
+URL 发现已完成不受影响——登出类 URL 仍进结果，记为「发现未请求」：
+```yaml
+safety:
+  enabled: true        # false 恢复旧行为（表单全提交、URL 全访问）
+  auto_profile: true   # 站点指纹识别：命中 DVWA 等已知站点自动叠加 strict 策略（额外拦设置类表单）
+  profile: "default"   # 真实站点想拦设置类表单可改 "strict"
+  url_skip: ["logout|signout|sign-out"]                # 不打开的 URL（正则）
+  form_submit_skip:                                    # 不自动提交的表单（正则，对 form outerHTML 匹配）
+    - "logout|signout|sign-out|注销|登出"
+    - "password_new|password_conf|password_current|old_?pass(word)?|new_?pass(word)?|curr_?pass(word)?|修改密码|更改密码|重置密码"
+    - "delete_?(user|account)|remove_?(user|account)|删除用户|删除账号"
+```
+另外修复了 `auto.filter` 默认值的 `lougout` 拼写错误（正确为 `logout`，点击层登出跳过此前从未生效）。
 
 ## 说明
 ### Scope 爬取范围控制

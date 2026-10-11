@@ -23,6 +23,7 @@ Supports the following:
 13. Updated to support multiple target crawling with single file output and custom UA specification
 14. JS endpoint extraction with HTTP method detection: `axios.post`/`$.put`, `fetch(url,{method})` and route tables `{method,path}` are recorded with their real verbs, not forced to GET
 15. Built-in web console: project-based multi-target crawling, live result stream, browser view streaming, GET/POST/unrequested stats and POST highlighting
+16. Safety guard (on by default): no password changes, no delete/reset form submissions, no visiting logout links — URL discovery is unaffected (logout-style URLs stay in results as "found, not requested"); known-range fingerprints (e.g. DVWA) automatically get a stricter profile
 
 Note: I've exposed many parameters that can be combined to achieve desired effects
 
@@ -291,6 +292,28 @@ elements), then export results:
 - SSE live result push; MJPEG browser view (~7fps) following the active tab
 - Single active crawl at a time, stoppable at any moment
 - Listens on localhost only, no auth — do not expose to the public internet
+
+### Safety guard (on by default)
+Automated interactions no longer mutate the target by default: no password changes,
+no delete/reset form submissions, no visiting logout links (an unguarded crawl of
+DVWA changed the admin password to empty and logged the session out — see
+docs/safety-guard-design.md). URL discovery is unaffected: logout-style URLs remain
+in results as "found, not requested":
+
+```yaml
+safety:
+  enabled: true        # false restores legacy behavior (submit every form, visit every URL)
+  auto_profile: true   # site fingerprinting: known ranges (DVWA) automatically get the strict profile (also blocks settings forms)
+  profile: "default"   # set to "strict" to block settings forms on real targets too
+  url_skip: ["logout|signout|sign-out"]                # URLs never opened (regex)
+  form_submit_skip:                                    # forms never auto-submitted (regex over form outerHTML)
+    - "logout|signout|sign-out"
+    - "password_new|password_conf|password_current|old_?pass(word)?|new_?pass(word)?|curr_?pass(word)?"
+    - "delete_?(user|account)|remove_?(user|account)"
+```
+
+Also fixed the `lougout` typo in the `auto.filter` default (should be `logout`; the
+click-layer logout skip never worked before).
 
 ## Description
 This is an assignment from w8ay's knowledge planet and relates to my recent work. It was designed and implemented based on various experts' foundations. Any issues are welcome through issues or direct contact.

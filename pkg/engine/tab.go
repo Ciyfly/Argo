@@ -9,6 +9,7 @@ import (
 	"argo/pkg/playback"
 	"argo/pkg/ratelimit"
 	"argo/pkg/req"
+	"argo/pkg/safety"
 	"argo/pkg/scope"
 	"argo/pkg/static"
 	"argo/pkg/utils"
@@ -234,6 +235,8 @@ func (ei *EngineInfo) NewTab(uif *UrlInfo, pageFlag int) {
 			ei.NormalCloseTab(page, PAGE404_FLAG, tabDone)
 			return
 		}
+		// 站点指纹识别：命中 DVWA 等已知站点时叠加 strict 防护档案（见 pkg/safety）
+		safety.ObserveHTML(html)
 		// 调试模式 手动去操作 停止所有
 		if conf.GlobalConfig.Dev {
 			return
@@ -549,6 +552,23 @@ func (ei *EngineInfo) PendUrlWork(ctx context.Context) {
 			// scope 外的 URL 记录后丢弃
 			if strings.Contains(uif.Url, "http") && !scope.IsInScope(uif.Url) {
 				scope.RecordOutScope(uif.Url)
+				continue
+			}
+			// safety：登出/会话销毁类 URL 不开 tab（避免爬虫主动登出自己），
+			// 仍记为「发现未请求」结果，URL 发现已完成
+			if safety.ShouldSkipURL(uif.Url) {
+				log.Logger.Debugf("safety skip url: %s", uif.Url)
+				pu := &PendingUrl{
+					URL:             uif.Url,
+					Method:          "GET",
+					Headers:         http.Header{},
+					Status:          0,
+					ResponseHeaders: http.Header{},
+				}
+				if u, err := urlpkg.Parse(uif.Url); err == nil {
+					pu.Host = u.Host
+				}
+				pushpendingNormalizeQueue(pu)
 				continue
 			}
 			if filterStaticPendUrl(uif.Url) {

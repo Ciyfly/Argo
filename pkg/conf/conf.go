@@ -50,7 +50,7 @@ browser:
   engine: "headless" # headless 全浏览器 | hybrid 文档页 Go 抓取分流（更快）
 auto:
   slow: 1000 # 事件触发的延迟时间
-  filter: ["lougout", "登出", "reset"] # 包含这种字符的就不进行触发事件
+  filter: ["logout", "登出", "reset"] # 包含这种字符的就不进行触发事件（点击层跳过）
   tab_idle: 10 # 页面静默多少秒后关闭（还在出新链接就不关），0 用默认 10s
   spider: true # 有头模式下展示蜘蛛爬行动画（点击元素时蜘蛛爬过去点中它）
 
@@ -69,6 +69,18 @@ form:
   rules: [] # 字段级填充规则（正则对 name/id/placeholder 匹配），如 [{match: "cardno", value: "110101199001011234"}]
   skip: ["captcha|verify_?code|validate_?code|短信验证码|验证码|otp"] # 命中即跳过的字段（正则）
 
+safety:
+  enabled: true # 危险操作防护总开关；false 恢复旧行为（表单全提交、URL 全访问）
+  auto_profile: true # 站点指纹识别：命中 DVWA 等已知站点时自动叠加该站点 strict 策略
+  profile: "default" # default | strict（strict 额外拦设置类表单，如改安全级别）
+  url_skip: ["logout|signout|sign-out"] # 不打开的 URL（正则，对完整 URL 小写匹配），命中仍记录为「发现未请求」结果
+  # 不自动提交的表单（正则，对 form outerHTML 小写匹配）
+  # 刻意不放裸 reset/清空：登录表单里常有「重置密码」链接/清空按钮，会误伤智能登录
+  form_submit_skip:
+    - "logout|signout|sign-out|注销|登出"
+    - "password_new|password_conf|password_current|old_?pass(word)?|new_?pass(word)?|curr_?pass(word)?|修改密码|更改密码|重置密码"
+    - "delete_?(user|account)|remove_?(user|account)|删除用户|删除账号"
+
 `
 
 type Conf struct {
@@ -78,6 +90,7 @@ type Conf struct {
 	ScopeConf        ScopeConf   `yaml:"scope"`
 	ExtractConf      ExtractConf `yaml:"extract"`
 	FormConf         FormConf    `yaml:"form"`
+	SafetyConf       SafetyConf  `yaml:"safety"`
 	InjectScriptPath string
 	ResultConf       ResultConf
 	PlaybackPath     string
@@ -131,6 +144,41 @@ type FormConf struct {
 type FormFillRule struct {
 	Match string `yaml:"match"`
 	Value string `yaml:"value"`
+}
+
+// SafetyConf 危险操作防护配置。
+//
+// 设计见 docs/safety-guard-design.md：默认拦改密码/删除/登出类副作用，
+// URL 发现不受损（命中 URL 记「发现未请求」），enabled=false 一键恢复旧行为。
+type SafetyConf struct {
+	// Enabled 总开关；false 时全部防护关闭（表单全提交、URL 全访问）
+	Enabled bool `yaml:"enabled"`
+	// AutoProfile 站点指纹识别：命中 DVWA 等已知站点时自动叠加 strict 策略
+	AutoProfile bool `yaml:"auto_profile"`
+	// Profile 手动指定策略档案：default | strict
+	Profile string `yaml:"profile"`
+	// UrlSkip 不打开的 URL 正则（对完整 URL 小写匹配），命中仍记录为结果
+	UrlSkip []string `yaml:"url_skip"`
+	// FormSubmitSkip 不自动提交的表单正则（对 form outerHTML 小写匹配）
+	FormSubmitSkip []string `yaml:"form_submit_skip"`
+}
+
+// DefaultSafetyConf 默认防护配置。
+//
+// 旧 config.yml 没有 safety 段时按此生效（readYamlConfig 先赋默认值再 Unmarshal，
+// yaml 里显式写的字段才会覆盖），避免「老配置静默失去防护」。
+func DefaultSafetyConf() SafetyConf {
+	return SafetyConf{
+		Enabled:     true,
+		AutoProfile: true,
+		Profile:     "default",
+		UrlSkip:     []string{"logout|signout|sign-out"},
+		FormSubmitSkip: []string{
+			"logout|signout|sign-out|注销|登出",
+			"password_new|password_conf|password_current|old_?pass(word)?|new_?pass(word)?|curr_?pass(word)?|修改密码|更改密码|重置密码",
+			"delete_?(user|account)|remove_?(user|account)|删除用户|删除账号",
+		},
+	}
 }
 
 // 默认的用户名密码
@@ -214,6 +262,8 @@ func readYamlConfig(configFile string) {
 		fmt.Printf("load config, fail to read 'config.yaml': %v\n", err)
 	}
 	GlobalConfig = &Conf{}
+	// safety 默认值先行：老配置文件没有 safety 段时也能默认开启防护
+	GlobalConfig.SafetyConf = DefaultSafetyConf()
 	err = yaml.Unmarshal(yamlFile, GlobalConfig)
 	if err != nil {
 		fmt.Printf("load config, fail to parse 'config.yaml', check format: %v\n", err)

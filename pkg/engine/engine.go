@@ -8,6 +8,7 @@ import (
 	"argo/pkg/login"
 	"argo/pkg/ratelimit"
 	"argo/pkg/req"
+	"argo/pkg/safety"
 	"argo/pkg/scope"
 	"argo/pkg/static"
 	"argo/pkg/utils"
@@ -201,6 +202,9 @@ func InitEngine(ctx context.Context, target string) *EngineInfo {
 	// 初始化 scope 规则（host 精确匹配 + 可选正则），并清空上一轮域外记录
 	scope.InitFromTarget(target, conf.GlobalConfig.ScopeConf)
 	scope.ResetOutScope()
+	// 初始化危险操作防护（safety），非法正则启动即 Fatal
+	sc := conf.GlobalConfig.SafetyConf
+	safety.Init(sc.Enabled, sc.AutoProfile, sc.Profile, sc.UrlSkip, sc.FormSubmitSkip)
 	// 表单填充规则正则启动即校验，写错第一时间 Fatal
 	if _, err := inject.FormRulesCheck(); err != nil {
 		log.Logger.Fatalf("form fill rules: %s", err)

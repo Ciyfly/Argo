@@ -3,6 +3,7 @@ package inject
 import (
 	"argo/pkg/conf"
 	"argo/pkg/log"
+	"argo/pkg/safety"
 	"argo/pkg/static"
 	"argo/pkg/utils"
 	"encoding/json"
@@ -202,12 +203,17 @@ var scanLinksDeepJS = `() => {
 	return out;
 }`
 
-var submitFormsJS = `async (username, password, email, phone, rulesJson) => {` + formFieldMatcherSrc + `
+var submitFormsJS = `async (username, password, email, phone, rulesJson, safetyJson) => {` + formFieldMatcherSrc + `
 	const done = [];
+	const skipped = [];
 	let conf = {};
 	try { conf = JSON.parse(rulesJson || "{}") || {}; } catch (e) {}
 	const userRules = conf.rules || [];
 	const skipRes = conf.skip || [];
+	// 危险操作防护：表单提交黑名单（logout/改密码/删除类），命中不提交
+	let safetyConf = {};
+	try { safetyConf = JSON.parse(safetyJson || "{}") || {}; } catch (e) {}
+	const submitSkipRes = safetyConf.skip || [];
 	const defaults = {username: username, password: password, email: email, phone: phone, search: "argo"};
 	function fill(el) {
 		if (el.value && el.value.length > 0) { return; }
@@ -227,9 +233,12 @@ var submitFormsJS = `async (username, password, email, phone, rulesJson) => {` +
 	Array.prototype.forEach.call(document.querySelectorAll("form"), function (f) {
 		const action = f.getAttribute("action") || "";
 		if (!action) { return; }
-		// 跳过登出类表单，避免把会话搞没
-		const low = (action + " " + (f.innerHTML || "")).toLowerCase();
-		if (low.indexOf("logout") >= 0 || low.indexOf("signout") >= 0) { return; }
+		// 危险表单跳过：outerHTML 含 action/字段name/按钮文案，黑名单对它整体匹配
+		//（命中即整个表单不提交，避免改密码/删除类副作用，见 docs/safety-guard-design.md）
+		const lowForm = (f.outerHTML || "").toLowerCase();
+		for (let s = 0; s < submitSkipRes.length; s++) {
+			if (regexTest(submitSkipRes[s], lowForm)) { skipped.push(action); return; }
+		}
 		Array.prototype.forEach.call(f.querySelectorAll("input, select, textarea"), function (el) {
 			if (!el.name) { return; }
 			if (el.tagName === "SELECT") {
@@ -259,7 +268,7 @@ var submitFormsJS = `async (username, password, email, phone, rulesJson) => {` +
 			try { f.submit(); done.push(action); } catch (e2) {}
 		}
 	});
-	return done;
+	return {done: done, skipped: skipped};
 }`
 
 // formRulesJSON 把配置里的填充规则序列化成 JS 侧参数，并校验正则合法性。
@@ -401,7 +410,20 @@ var listClickableJS = fmt.Sprintf(`(filters) => {`+clickableCollectorSrc+`
 //   - <a href> ：直接跳转
 //   - <button formaction> ：提交表单并跳转（靶场里真实存在这种元素，
 //     一旦触发，后面所有点击都会落在错误页面上）
-var clickBySigJS = fmt.Sprintf(`async (targetSig, targetXPath) => {`+clickableCollectorSrc+`
+var clickBySigJS = fmt.Sprintf(`async (targetSig, targetXPath, safetyJson) => {`+clickableCollectorSrc+`
+	const done = [];
+	// 危险表单黑名单（safety 包生成；disabled 时为空列表）
+	let safetyConf = {};
+	try { safetyConf = JSON.parse(safetyJson || "{}") || {}; } catch (e) {}
+	const submitSkipRes = safetyConf.skip || [];
+	function formIsDangerous(f) {
+		if (!f || submitSkipRes.length === 0) { return false; }
+		const lowForm = (f.outerHTML || "").toLowerCase();
+		for (let s = 0; s < submitSkipRes.length; s++) {
+			try { if (new RegExp(submitSkipRes[s]).test(lowForm)) { return true; } catch (e) {} }
+		}
+		return false;
+	}
 	const nodes = argoClickableNodes(%s);
 	const counter = {};
 	let el = null;
@@ -422,6 +444,14 @@ var clickBySigJS = fmt.Sprintf(`async (targetSig, targetXPath) => {`+clickableCo
 		} catch (e) {}
 	}
 	if (!el) { return false; }
+	// 危险表单防护：input[type=submit] 的点击会原生提交所属表单（改密码/删除类
+	// 副作用可从这里绕过 submitFormsJS 的黑名单），所属表单命中黑名单时整个不点。
+	// 非危险表单保留原生提交——shop 的筛选/排序/分页依赖它（无差别降级 type=button
+	// 实测让 classic 基准 0.946 掉到 0.745）
+	if (el.tagName === "INPUT" && (el.getAttribute("type") || "text").toLowerCase() === "submit" &&
+		formIsDangerous(el.closest("form"))) {
+		return false;
+	}
 	// 蜘蛛动画（有头模式注入时）：爬过去伸腿点中，再执行真实点击；
 	// 无头未注入时 __argoSpider 不存在，直接跳过零开销
 	// 零尺寸/隐藏元素是纯浪费，直接弃（interactable 第一层）
@@ -465,8 +495,9 @@ var clickBySigJS = fmt.Sprintf(`async (targetSig, targetXPath) => {`+clickableCo
 		el.setAttribute("data-argo-formaction", el.getAttribute("formaction"));
 		el.removeAttribute("formaction");
 	}
-	// 表单提交类按钮也改成普通按钮，避免整页刷新
-	if (el.tagName === "BUTTON" && (el.getAttribute("type") || "").toLowerCase() === "submit") {
+	// BUTTON 的隐式 type 就是 submit，降级成普通按钮避免整页刷新；
+	// 表单的真实提交统一由 submitFormsJS 负责（危险表单在那一层有黑名单把关）
+	if (el.tagName === "BUTTON" && (el.getAttribute("type") || "submit").toLowerCase() === "submit") {
 		el.setAttribute("type", "button");
 	}
 	// click() 是 HTMLElement 的方法，SVG / 自定义元素上不存在
@@ -969,7 +1000,7 @@ func Auto(page *rod.Page, reportProgress func()) []string {
 	// routeAway=SPA 同文档路由跳转（视图已换，不回起点——见 pass2 的链式跟随）。
 	clickSig := func(sig, xpath string, settle time.Duration) (changed bool, gained int, navAway bool, routeAway bool) {
 		_, _ = page.Eval(armStateJS)
-		res, err := page.Eval(clickBySigJS, sig, xpath)
+		res, err := page.Eval(clickBySigJS, sig, xpath, safety.FormSkipPayload())
 		if err != nil {
 			// 上下文失效 = 真导航走了，回起点继续下一个
 			log.Logger.Debugf("auto click %s navigated away: %s", sig, err)
@@ -1162,7 +1193,7 @@ func Auto(page *rod.Page, reportProgress func()) []string {
 				fresh++
 				log.Logger.Debugf("auto extra element: %s", sig)
 				_, _ = page.Eval(armStateJS)
-				if _, err := page.Eval(clickBySigJS, sig, sigXPath(items, i)); err != nil {
+				if _, err := page.Eval(clickBySigJS, sig, sigXPath(items, i), safety.FormSkipPayload()); err != nil {
 					backToStart(page, startURL)
 					continue
 				}
@@ -1176,7 +1207,7 @@ func Auto(page *rod.Page, reportProgress func()) []string {
 							break
 						}
 						_, _ = page.Eval(armStateJS)
-						if _, err := page.Eval(clickBySigJS, sig, sigXPath(items, i)); err != nil {
+						if _, err := page.Eval(clickBySigJS, sig, sigXPath(items, i), safety.FormSkipPayload()); err != nil {
 							break
 						}
 						before := len(hrefList)
@@ -1202,10 +1233,18 @@ func Auto(page *rod.Page, reportProgress func()) []string {
 	// 等待压到 600ms：提交只是为了让 POST 请求发出去，流量劫持会立即捕获；
 	// 等太久会挤占其他交互的预算（实测等 1.5s 会把 shop 类挤掉 20 多条）。
 	if _, err := page.Eval(armStateJS); err == nil {
-		if _, err := page.Eval(submitFormsJS,
+		// safetyJson：表单提交黑名单（safety 包按当前档案生成；disabled 时为空列表）
+		res, err := page.Eval(submitFormsJS,
 			cfg.LoginConf.Username, cfg.LoginConf.Password,
-			cfg.LoginConf.Email, cfg.LoginConf.Phone, formRules); err != nil {
+			cfg.LoginConf.Email, cfg.LoginConf.Phone, formRules, safety.FormSkipPayload())
+		if err != nil {
 			log.Logger.Debugf("auto submit forms err: %s", err)
+		} else if res != nil {
+			for _, v := range res.Value.Get("skipped").Arr() {
+				if act := v.Str(); act != "" {
+					log.Logger.Debugf("safety skip form: %s", act)
+				}
+			}
 		}
 		_ = settleAfterClick(page, 600*time.Millisecond)
 		collect()

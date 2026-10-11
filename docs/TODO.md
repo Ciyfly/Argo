@@ -23,3 +23,4 @@
 - [ ] 注入审计遗留：iframe 交互/真实鼠标 hover 事件/javascript: 静态提取/反爬伪装 (见 docs/inject-audit.md backlog)
 - [x] SPA 路由链四件套 (调研: docs/spa-crawling-research.md + docs/spider-overlay-design.md，完成 2026-10-03：等价重置/链式跟随/骨架哈希/双基准路由，spa 0.836→**0.914**，整场 140s→36s)
 - [ ] SPA 登录后动态路由跟进 (待立项：oss-comparison.md Top1，spa_auth 0.154→0.8+)
+- [x] 危险操作防护 safety guard (设计: docs/safety-guard-design.md，完成 2026-10-11：表单提交黑名单+URL 安全过滤(发现未请求)+危险表单点击层拦截+filter 拼写修复+DVWA 指纹 strict 档案；DVWA 端到端零危险请求且密码未动，classic 复测 0.9664 高于基线零回归；期间排查出 classic 掉 0.745 系靶场容器被旧镜像拉起(§7.1)，compose 重建后恢复)
